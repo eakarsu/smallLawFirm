@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Select,
   SelectContent,
@@ -25,6 +26,12 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog'
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
   Table,
   TableBody,
   TableCell,
@@ -40,9 +47,16 @@ import {
   Clock,
   Calendar,
   Edit,
-  Trash2
+  Trash2,
+  Download,
+  FileText,
+  FileSpreadsheet,
 } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
+import { PageSkeleton } from '@/components/ui/loading-skeleton'
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog'
+import { Pagination } from '@/components/ui/pagination'
+import { SortHeader } from '@/components/ui/sort-header'
 
 interface Deadline {
   id: string
@@ -69,6 +83,13 @@ interface Matter {
   id: string
   name: string
   matterNumber: string
+}
+
+interface PaginationMeta {
+  total: number
+  page: number
+  limit: number
+  totalPages: number
 }
 
 const deadlineTypes = [
@@ -98,6 +119,33 @@ export default function DeadlinesPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
 
+  // Pagination state
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
+  const [pagination, setPagination] = useState<PaginationMeta>({ total: 0, page: 1, limit: 25, totalPages: 1 })
+
+  // Sort state
+  const [sortBy, setSortBy] = useState('dueDate')
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc')
+
+  // Bulk selection state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+
+  // Confirmation dialog state
+  const [confirmDialog, setConfirmDialog] = useState<{
+    open: boolean
+    title: string
+    description: string
+    variant: 'danger' | 'warning' | 'info'
+    onConfirm: () => void
+  }>({
+    open: false,
+    title: '',
+    description: '',
+    variant: 'danger',
+    onConfirm: () => {}
+  })
+
   const [formData, setFormData] = useState({
     matterId: '',
     title: '',
@@ -111,27 +159,37 @@ export default function DeadlinesPage() {
   const [detailDialogOpen, setDetailDialogOpen] = useState(false)
   const [editingDeadline, setEditingDeadline] = useState<Deadline | null>(null)
 
-  useEffect(() => {
-    fetchDeadlines()
-    fetchMatters()
-  }, [statusFilter, typeFilter])
-
-  const fetchDeadlines = async () => {
+  const fetchDeadlines = useCallback(async () => {
     try {
       const params = new URLSearchParams()
-      if (statusFilter) params.set('status', statusFilter)
+      if (statusFilter && statusFilter !== 'all') params.set('status', statusFilter)
+      params.set('page', String(page))
+      params.set('limit', String(pageSize))
+      params.set('sortBy', sortBy)
+      params.set('sortOrder', sortOrder)
 
       const res = await fetch(`/api/deadlines?${params}`)
       if (res.ok) {
         const data = await res.json()
         setDeadlines(data.deadlines)
+        if (data.pagination) {
+          setPagination(data.pagination)
+        }
       }
     } catch (error) {
       console.error('Failed to fetch deadlines:', error)
     } finally {
       setLoading(false)
     }
-  }
+  }, [statusFilter, page, pageSize, sortBy, sortOrder])
+
+  useEffect(() => {
+    fetchDeadlines()
+  }, [fetchDeadlines])
+
+  useEffect(() => {
+    fetchMatters()
+  }, [])
 
   const fetchMatters = async () => {
     try {
@@ -214,8 +272,6 @@ export default function DeadlinesPage() {
   }
 
   const handleDeleteDeadline = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this deadline?')) return
-
     try {
       const res = await fetch(`/api/deadlines/${id}`, {
         method: 'DELETE'
@@ -227,6 +283,61 @@ export default function DeadlinesPage() {
     } catch (error) {
       console.error('Failed to delete deadline:', error)
     }
+  }
+
+  const confirmDeleteDeadline = (id: string) => {
+    setConfirmDialog({
+      open: true,
+      title: 'Delete Deadline',
+      description: 'Are you sure you want to delete this deadline? This action cannot be undone.',
+      variant: 'danger',
+      onConfirm: () => {
+        handleDeleteDeadline(id)
+        setConfirmDialog(prev => ({ ...prev, open: false }))
+      }
+    })
+  }
+
+  const handleBulkDelete = () => {
+    if (selectedIds.size === 0) return
+    setConfirmDialog({
+      open: true,
+      title: 'Delete Selected Deadlines',
+      description: `Are you sure you want to delete ${selectedIds.size} selected deadline(s)? This action cannot be undone.`,
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog(prev => ({ ...prev, open: false }))
+        const promises = Array.from(selectedIds).map(id =>
+          fetch(`/api/deadlines/${id}`, { method: 'DELETE' })
+        )
+        await Promise.all(promises)
+        setSelectedIds(new Set())
+        fetchDeadlines()
+      }
+    })
+  }
+
+  const handleBulkStatusUpdate = (newStatus: string) => {
+    if (selectedIds.size === 0) return
+    setConfirmDialog({
+      open: true,
+      title: 'Update Status',
+      description: `Are you sure you want to update the status of ${selectedIds.size} deadline(s) to "${newStatus}"?`,
+      variant: 'warning',
+      onConfirm: async () => {
+        setConfirmDialog(prev => ({ ...prev, open: false }))
+        const promises = Array.from(selectedIds).map(id =>
+          fetch(`/api/deadlines/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: newStatus })
+          })
+        )
+        await Promise.all(promises)
+        setSelectedIds(new Set())
+        fetchDeadlines()
+      }
+    })
   }
 
   const handleEdit = (deadline: Deadline) => {
@@ -251,6 +362,49 @@ export default function DeadlinesPage() {
       dueDate: '',
       reminderDays: '7'
     })
+  }
+
+  const handleSort = (field: string) => {
+    if (sortBy === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortBy(field)
+      setSortOrder('asc')
+    }
+    setPage(1)
+  }
+
+  const handlePageChange = (newPage: number) => {
+    setPage(newPage)
+    setSelectedIds(new Set())
+  }
+
+  const handlePageSizeChange = (newSize: number) => {
+    setPageSize(newSize)
+    setPage(1)
+    setSelectedIds(new Set())
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredDeadlines.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(filteredDeadlines.map(d => d.id)))
+    }
+  }
+
+  const toggleSelect = (id: string) => {
+    const newSet = new Set(selectedIds)
+    if (newSet.has(id)) {
+      newSet.delete(id)
+    } else {
+      newSet.add(id)
+    }
+    setSelectedIds(newSet)
+  }
+
+  const handleExport = (format: 'csv' | 'pdf') => {
+    window.open(`/api/export?entity=deadlines&format=${format}`, '_blank')
   }
 
   const getClientName = (client: Deadline['matter']['client']) => {
@@ -300,11 +454,7 @@ export default function DeadlinesPage() {
   const urgentCount = deadlines.filter(d => d.status === 'PENDING' && getDaysUntil(d.dueDate) >= 0 && getDaysUntil(d.dueDate) <= 7).length
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900" />
-      </div>
-    )
+    return <PageSkeleton />
   }
 
   return (
@@ -314,114 +464,134 @@ export default function DeadlinesPage() {
           <h1 className="text-2xl font-bold text-gray-900">Deadlines</h1>
           <p className="text-gray-500">Track and manage case deadlines</p>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={(open) => {
-          setDialogOpen(open)
-          if (!open) {
-            setEditingDeadline(null)
-            resetForm()
-          }
-        }}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="w-4 h-4 mr-2" />
-              New Deadline
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
-              <DialogTitle>{editingDeadline ? 'Edit Deadline' : 'New Deadline'}</DialogTitle>
-              <DialogDescription>{editingDeadline ? 'Update deadline details' : 'Create a new deadline'}</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label>Matter *</Label>
-                <Select
-                  value={formData.matterId}
-                  onValueChange={(v) => setFormData({ ...formData, matterId: v })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a matter" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {matters.map((matter) => (
-                      <SelectItem key={matter.id} value={matter.id}>
-                        {matter.matterNumber} - {matter.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="title">Title *</Label>
-                <Input
-                  id="title"
-                  value={formData.title}
-                  onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
+        <div className="flex items-center gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline">
+                <Download className="w-4 h-4 mr-2" />
+                Export
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => handleExport('csv')}>
+                <FileSpreadsheet className="mr-2 h-4 w-4" />
+                Export CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('pdf')}>
+                <FileText className="mr-2 h-4 w-4" />
+                Export PDF
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Dialog open={dialogOpen} onOpenChange={(open) => {
+            setDialogOpen(open)
+            if (!open) {
+              setEditingDeadline(null)
+              resetForm()
+            }
+          }}>
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="w-4 h-4 mr-2" />
+                New Deadline
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>{editingDeadline ? 'Edit Deadline' : 'New Deadline'}</DialogTitle>
+                <DialogDescription>{editingDeadline ? 'Update deadline details' : 'Create a new deadline'}</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
                 <div className="space-y-2">
-                  <Label>Type</Label>
+                  <Label>Matter *</Label>
                   <Select
-                    value={formData.deadlineType}
-                    onValueChange={(v) => setFormData({ ...formData, deadlineType: v })}
+                    value={formData.matterId}
+                    onValueChange={(v) => setFormData({ ...formData, matterId: v })}
                   >
                     <SelectTrigger>
-                      <SelectValue />
+                      <SelectValue placeholder="Select a matter" />
                     </SelectTrigger>
                     <SelectContent>
-                      {deadlineTypes.map((type) => (
-                        <SelectItem key={type.value} value={type.value}>
-                          {type.label}
+                      {matters.map((matter) => (
+                        <SelectItem key={matter.id} value={matter.id}>
+                          {matter.matterNumber} - {matter.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="dueDate">Due Date *</Label>
+                  <Label htmlFor="title">Title *</Label>
                   <Input
-                    id="dueDate"
-                    type="date"
-                    value={formData.dueDate}
-                    onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
+                    id="title"
+                    value={formData.title}
+                    onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Type</Label>
+                    <Select
+                      value={formData.deadlineType}
+                      onValueChange={(v) => setFormData({ ...formData, deadlineType: v })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {deadlineTypes.map((type) => (
+                          <SelectItem key={type.value} value={type.value}>
+                            {type.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="dueDate">Due Date *</Label>
+                    <Input
+                      id="dueDate"
+                      type="date"
+                      value={formData.dueDate}
+                      onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="reminderDays">Reminder Days Before</Label>
+                  <Input
+                    id="reminderDays"
+                    type="number"
+                    value={formData.reminderDays}
+                    onChange={(e) => setFormData({ ...formData, reminderDays: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="description">Description</Label>
+                  <Textarea
+                    id="description"
+                    value={formData.description}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    rows={2}
                   />
                 </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="reminderDays">Reminder Days Before</Label>
-                <Input
-                  id="reminderDays"
-                  type="number"
-                  value={formData.reminderDays}
-                  onChange={(e) => setFormData({ ...formData, reminderDays: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="description">Description</Label>
-                <Textarea
-                  id="description"
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  rows={2}
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => {
-                setDialogOpen(false)
-                setEditingDeadline(null)
-                resetForm()
-              }}>Cancel</Button>
-              <Button
-                onClick={editingDeadline ? handleUpdateDeadline : handleCreateDeadline}
-                disabled={!formData.matterId || !formData.title || !formData.dueDate}
-              >
-                {editingDeadline ? 'Update' : 'Create'} Deadline
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => {
+                  setDialogOpen(false)
+                  setEditingDeadline(null)
+                  resetForm()
+                }}>Cancel</Button>
+                <Button
+                  onClick={editingDeadline ? handleUpdateDeadline : handleCreateDeadline}
+                  disabled={!formData.matterId || !formData.title || !formData.dueDate}
+                >
+                  {editingDeadline ? 'Update' : 'Create'} Deadline
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       {/* Summary Cards */}
@@ -472,6 +642,39 @@ export default function DeadlinesPage() {
         </Card>
       </div>
 
+      {/* Bulk Actions Bar */}
+      {selectedIds.size > 0 && (
+        <div className="mb-4 flex items-center gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <span className="text-sm font-medium text-blue-800">
+            {selectedIds.size} selected
+          </span>
+          <Button variant="destructive" size="sm" onClick={handleBulkDelete}>
+            <Trash2 className="w-4 h-4 mr-1" />
+            Delete Selected
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm">
+                Update Status
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              {statuses.map((status) => (
+                <DropdownMenuItem
+                  key={status.value}
+                  onClick={() => handleBulkStatusUpdate(status.value)}
+                >
+                  {status.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
+            Clear Selection
+          </Button>
+        </div>
+      )}
+
       <Card>
         <CardHeader>
           <div className="flex flex-col sm:flex-row gap-4">
@@ -484,7 +687,7 @@ export default function DeadlinesPage() {
                 className="pl-10"
               />
             </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1) }}>
               <SelectTrigger className="w-[150px]">
                 <SelectValue placeholder="All Status" />
               </SelectTrigger>
@@ -516,70 +719,92 @@ export default function DeadlinesPage() {
               <Button onClick={() => setDialogOpen(true)}>Create Your First Deadline</Button>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Deadline</TableHead>
-                  <TableHead>Matter</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Due Date</TableHead>
-                  <TableHead>Urgency</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredDeadlines.map((deadline) => (
-                  <TableRow
-                    key={deadline.id}
-                    className="cursor-pointer hover:bg-gray-50"
-                    onClick={() => {
-                      setSelectedDeadline(deadline)
-                      setDetailDialogOpen(true)
-                    }}
-                  >
-                    <TableCell>
-                      <div>
-                        <p className="font-medium">{deadline.title}</p>
-                        {deadline.description && (
-                          <p className="text-sm text-gray-500 truncate max-w-xs">{deadline.description}</p>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Link
-                        href={`/matters/${deadline.matter.id}`}
-                        className="text-blue-600 hover:underline"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {deadline.matter.matterNumber}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      {deadlineTypes.find(t => t.value === deadline.deadlineType)?.label || deadline.deadlineType}
-                    </TableCell>
-                    <TableCell>{formatDate(deadline.dueDate)}</TableCell>
-                    <TableCell>{getUrgencyBadge(deadline)}</TableCell>
-                    <TableCell onClick={(e) => e.stopPropagation()}>
-                      <Select
-                        value={deadline.status}
-                        onValueChange={(v) => handleUpdateStatus(deadline.id, v)}
-                      >
-                        <SelectTrigger className="w-[130px]">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {statuses.map((status) => (
-                            <SelectItem key={status.value} value={status.value}>
-                              {status.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[40px]">
+                      <Checkbox
+                        checked={selectedIds.size === filteredDeadlines.length && filteredDeadlines.length > 0}
+                        onCheckedChange={toggleSelectAll}
+                      />
+                    </TableHead>
+                    <SortHeader label="Deadline" field="title" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
+                    <TableHead>Matter</TableHead>
+                    <SortHeader label="Type" field="deadlineType" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
+                    <SortHeader label="Due Date" field="dueDate" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
+                    <TableHead>Urgency</TableHead>
+                    <SortHeader label="Status" field="status" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {filteredDeadlines.map((deadline) => (
+                    <TableRow
+                      key={deadline.id}
+                      className="cursor-pointer hover:bg-gray-50"
+                      onClick={() => {
+                        setSelectedDeadline(deadline)
+                        setDetailDialogOpen(true)
+                      }}
+                    >
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <Checkbox
+                          checked={selectedIds.has(deadline.id)}
+                          onCheckedChange={() => toggleSelect(deadline.id)}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <div>
+                          <p className="font-medium">{deadline.title}</p>
+                          {deadline.description && (
+                            <p className="text-sm text-gray-500 truncate max-w-xs">{deadline.description}</p>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Link
+                          href={`/matters/${deadline.matter.id}`}
+                          className="text-blue-600 hover:underline"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {deadline.matter.matterNumber}
+                        </Link>
+                      </TableCell>
+                      <TableCell>
+                        {deadlineTypes.find(t => t.value === deadline.deadlineType)?.label || deadline.deadlineType}
+                      </TableCell>
+                      <TableCell>{formatDate(deadline.dueDate)}</TableCell>
+                      <TableCell>{getUrgencyBadge(deadline)}</TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <Select
+                          value={deadline.status}
+                          onValueChange={(v) => handleUpdateStatus(deadline.id, v)}
+                        >
+                          <SelectTrigger className="w-[130px]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {statuses.map((status) => (
+                              <SelectItem key={status.value} value={status.value}>
+                                {status.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <Pagination
+                page={pagination.page}
+                totalPages={pagination.totalPages}
+                totalItems={pagination.total}
+                pageSize={pageSize}
+                onPageChange={handlePageChange}
+                onPageSizeChange={handlePageSizeChange}
+              />
+            </>
           )}
         </CardContent>
       </Card>
@@ -668,8 +893,8 @@ export default function DeadlinesPage() {
               variant="destructive"
               onClick={() => {
                 if (selectedDeadline) {
-                  handleDeleteDeadline(selectedDeadline.id)
                   setDetailDialogOpen(false)
+                  confirmDeleteDeadline(selectedDeadline.id)
                 }
               }}
             >
@@ -679,6 +904,17 @@ export default function DeadlinesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Confirmation Dialog */}
+      <ConfirmationDialog
+        open={confirmDialog.open}
+        onOpenChange={(open) => setConfirmDialog(prev => ({ ...prev, open }))}
+        title={confirmDialog.title}
+        description={confirmDialog.description}
+        variant={confirmDialog.variant}
+        confirmLabel={confirmDialog.variant === 'danger' ? 'Delete' : 'Confirm'}
+        onConfirm={confirmDialog.onConfirm}
+      />
     </div>
   )
 }

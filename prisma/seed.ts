@@ -623,10 +623,13 @@ async function main() {
     const total = subtotal + taxAmount
     const status = ['DRAFT', 'SENT', 'PAID', 'PARTIAL', 'OVERDUE'][Math.floor(Math.random() * 5)]
 
+    const invoiceNumber = `INV-2024${String(i + 1).padStart(4, '0')}`
     invoices.push(
-      prisma.invoice.create({
-        data: {
-          invoiceNumber: `INV-2024${String(i + 1).padStart(4, '0')}`,
+      prisma.invoice.upsert({
+        where: { invoiceNumber },
+        update: {},
+        create: {
+          invoiceNumber,
           clientId: matter.clientId,
           matterId: matter.id,
           issueDate: new Date(Date.now() - Math.floor(Math.random() * 60) * 24 * 60 * 60 * 1000),

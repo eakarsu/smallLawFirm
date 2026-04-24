@@ -34,6 +34,7 @@ import {
   AlertTriangle
 } from 'lucide-react'
 import { formatDate, formatDateTime } from '@/lib/utils'
+import { DashboardSkeleton } from '@/components/ui/loading-skeleton'
 
 interface CalendarEvent {
   id: string
@@ -195,11 +196,7 @@ export default function CalendarPage() {
   })
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900" />
-      </div>
-    )
+    return <DashboardSkeleton />
   }
 
   return (

@@ -20,6 +20,15 @@ model User {
   department    String?
   hourlyRate    Decimal?  @db.Decimal(10, 2)
   isActive      Boolean   @default(true)
+
+  // Password reset
+  passwordResetToken   String?
+  passwordResetExpires DateTime?
+
+  // Email verification
+  emailVerified          Boolean   @default(false)
+  emailVerificationToken String?
+
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -956,6 +965,12 @@ enum AIRequestType {
   DEADLINE_CALC
   EMAIL_DRAFT
   DISCOVERY
+  CASE_OUTCOME
+  PATENT_ANALYSIS
+  TRADEMARK_CHECK
+  BILLING_OPTIMIZER
+  COURT_DATE_TRACKER
+  IMMIGRATION_FORM
 }
 
 enum AIRequestStatus {

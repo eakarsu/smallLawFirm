@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
 import { generateClientNumber } from '@/lib/utils'
+import { getPaginationParams, paginationMeta } from '@/lib/pagination'
+import { handleApiError } from '@/lib/api-error-handler'
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,6 +16,7 @@ export async function GET(request: NextRequest) {
     const search = searchParams.get('search') || ''
     const status = searchParams.get('status') || ''
     const type = searchParams.get('type') || ''
+    const { page, limit, sortBy, sortOrder, skip } = getPaginationParams(request, { sortBy: 'createdAt' })
 
     const where: any = {}
 
@@ -27,28 +30,43 @@ export async function GET(request: NextRequest) {
       ]
     }
 
-    if (status) {
-      where.status = status
+    if (status) where.status = status
+    if (type) where.type = type
+
+    const allowedSortFields: Record<string, any> = {
+      createdAt: { createdAt: sortOrder },
+      clientNumber: { clientNumber: sortOrder },
+      firstName: { firstName: sortOrder },
+      lastName: { lastName: sortOrder },
+      companyName: { companyName: sortOrder },
+      email: { email: sortOrder },
+      status: { status: sortOrder },
+      type: { type: sortOrder },
     }
 
-    if (type) {
-      where.type = type
-    }
+    const orderBy = allowedSortFields[sortBy] || { createdAt: 'desc' }
 
-    const clients = await prisma.client.findMany({
-      where,
-      include: {
-        _count: {
-          select: { matters: true }
-        }
-      },
-      orderBy: { createdAt: 'desc' }
+    const [clients, total] = await Promise.all([
+      prisma.client.findMany({
+        where,
+        include: {
+          _count: {
+            select: { matters: true }
+          }
+        },
+        orderBy,
+        skip,
+        take: limit
+      }),
+      prisma.client.count({ where })
+    ])
+
+    return NextResponse.json({
+      clients,
+      pagination: paginationMeta(total, page, limit)
     })
-
-    return NextResponse.json({ clients })
   } catch (error) {
-    console.error('Clients GET error:', error)
-    return NextResponse.json({ error: 'Failed to fetch clients' }, { status: 500 })
+    return handleApiError(error)
   }
 }
 
@@ -61,42 +79,16 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json()
     const {
-      type,
-      firstName,
-      lastName,
-      middleName,
-      companyName,
-      email,
-      phone,
-      mobile,
-      fax,
-      address,
-      city,
-      state,
-      zipCode,
-      country,
-      billingRate,
-      billingMethod,
-      portalEnabled
+      type, firstName, lastName, middleName, companyName, email, phone, mobile, fax,
+      address, city, state, zipCode, country, billingRate, billingMethod, portalEnabled
     } = body
 
     const client = await prisma.client.create({
       data: {
         clientNumber: generateClientNumber(),
         type: type || 'INDIVIDUAL',
-        firstName,
-        lastName,
-        middleName,
-        companyName,
-        email,
-        phone,
-        mobile,
-        fax,
-        address,
-        city,
-        state,
-        zipCode,
-        country,
+        firstName, lastName, middleName, companyName, email, phone, mobile, fax,
+        address, city, state, zipCode, country,
         billingRate: billingRate ? parseFloat(billingRate) : null,
         billingMethod: billingMethod || 'HOURLY',
         portalEnabled: portalEnabled || false,
@@ -106,7 +98,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ client }, { status: 201 })
   } catch (error) {
-    console.error('Client POST error:', error)
-    return NextResponse.json({ error: 'Failed to create client' }, { status: 500 })
+    return handleApiError(error)
   }
 }

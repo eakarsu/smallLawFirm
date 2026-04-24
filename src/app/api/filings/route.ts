@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
+import { getPaginationParams, paginationMeta } from '@/lib/pagination'
+import { handleApiError } from '@/lib/api-error-handler'
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,6 +15,7 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status') || ''
     const matterId = searchParams.get('matterId') || ''
     const search = searchParams.get('search') || ''
+    const { page, limit, sortBy, sortOrder, skip } = getPaginationParams(request, { sortBy: 'createdAt' })
 
     const where: any = {}
     if (status && status !== 'all') where.status = status
@@ -27,20 +30,38 @@ export async function GET(request: NextRequest) {
       ]
     }
 
-    const filings = await prisma.courtFiling.findMany({
-      where,
-      include: {
-        matter: {
-          select: { id: true, name: true, matterNumber: true }
-        }
-      },
-      orderBy: { createdAt: 'desc' }
-    })
+    const allowedSortFields: Record<string, any> = {
+      createdAt: { createdAt: sortOrder },
+      documentName: { documentName: sortOrder },
+      filingType: { filingType: sortOrder },
+      courtName: { courtName: sortOrder },
+      dueDate: { dueDate: sortOrder },
+      status: { status: sortOrder },
+    }
 
-    return NextResponse.json({ filings })
+    const orderBy = allowedSortFields[sortBy] || { createdAt: 'desc' }
+
+    const [filings, total] = await Promise.all([
+      prisma.courtFiling.findMany({
+        where,
+        include: {
+          matter: {
+            select: { id: true, name: true, matterNumber: true }
+          }
+        },
+        orderBy,
+        skip,
+        take: limit
+      }),
+      prisma.courtFiling.count({ where })
+    ])
+
+    return NextResponse.json({
+      filings,
+      pagination: paginationMeta(total, page, limit)
+    })
   } catch (error) {
-    console.error('Filings GET error:', error)
-    return NextResponse.json({ error: 'Failed to fetch filings' }, { status: 500 })
+    return handleApiError(error)
   }
 }
 
@@ -70,7 +91,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ filing }, { status: 201 })
   } catch (error) {
-    console.error('Filing POST error:', error)
-    return NextResponse.json({ error: 'Failed to create filing' }, { status: 500 })
+    return handleApiError(error)
   }
 }

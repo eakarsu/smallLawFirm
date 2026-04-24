@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
+import { getPaginationParams, paginationMeta } from '@/lib/pagination'
+import { handleApiError } from '@/lib/api-error-handler'
 
 export async function GET(request: NextRequest) {
   try {
@@ -11,25 +13,39 @@ export async function GET(request: NextRequest) {
 
     const searchParams = request.nextUrl.searchParams
     const unreadOnly = searchParams.get('unreadOnly') === 'true'
-    const limit = parseInt(searchParams.get('limit') || '20')
+    const { page, limit, sortBy, sortOrder, skip } = getPaginationParams(request, { sortBy: 'createdAt' })
 
     const where: any = { userId: user.id }
     if (unreadOnly) where.isRead = false
 
-    const notifications = await prisma.notification.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take: limit
-    })
+    const allowedSortFields: Record<string, any> = {
+      createdAt: { createdAt: sortOrder },
+      type: { type: sortOrder },
+      title: { title: sortOrder },
+    }
 
-    const unreadCount = await prisma.notification.count({
-      where: { userId: user.id, isRead: false }
-    })
+    const orderBy = allowedSortFields[sortBy] || { createdAt: 'desc' }
 
-    return NextResponse.json({ notifications, unreadCount })
+    const [notifications, total, unreadCount] = await Promise.all([
+      prisma.notification.findMany({
+        where,
+        orderBy,
+        skip,
+        take: limit
+      }),
+      prisma.notification.count({ where }),
+      prisma.notification.count({
+        where: { userId: user.id, isRead: false }
+      })
+    ])
+
+    return NextResponse.json({
+      notifications,
+      unreadCount,
+      pagination: paginationMeta(total, page, limit)
+    })
   } catch (error) {
-    console.error('Notifications GET error:', error)
-    return NextResponse.json({ error: 'Failed to fetch notifications' }, { status: 500 })
+    return handleApiError(error)
   }
 }
 
@@ -55,8 +71,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ notification }, { status: 201 })
   } catch (error) {
-    console.error('Notification POST error:', error)
-    return NextResponse.json({ error: 'Failed to create notification' }, { status: 500 })
+    return handleApiError(error)
   }
 }
 
@@ -75,7 +90,6 @@ export async function PUT(request: NextRequest) {
 
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error('Notifications PUT error:', error)
-    return NextResponse.json({ error: 'Failed to mark notifications as read' }, { status: 500 })
+    return handleApiError(error)
   }
 }

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
+import { getPaginationParams, paginationMeta } from '@/lib/pagination'
+import { handleApiError } from '@/lib/api-error-handler'
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,6 +16,7 @@ export async function GET(request: NextRequest) {
     const userId = searchParams.get('userId') || ''
     const startDate = searchParams.get('startDate') || ''
     const endDate = searchParams.get('endDate') || ''
+    const { page, limit, sortBy, sortOrder, skip } = getPaginationParams(request, { sortBy: 'date' })
 
     const where: any = {}
 
@@ -26,14 +29,30 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const timeEntries = await prisma.timeEntry.findMany({
-      where,
-      include: {
-        matter: { select: { id: true, name: true, matterNumber: true } },
-        user: { select: { id: true, name: true } }
-      },
-      orderBy: { date: 'desc' }
-    })
+    const allowedSortFields: Record<string, any> = {
+      createdAt: { createdAt: sortOrder },
+      date: { date: sortOrder },
+      hours: { hours: sortOrder },
+      rate: { rate: sortOrder },
+      amount: { amount: sortOrder },
+      billableStatus: { billableStatus: sortOrder },
+    }
+
+    const orderBy = allowedSortFields[sortBy] || { date: 'desc' }
+
+    const [timeEntries, total] = await Promise.all([
+      prisma.timeEntry.findMany({
+        where,
+        include: {
+          matter: { select: { id: true, name: true, matterNumber: true } },
+          user: { select: { id: true, name: true } }
+        },
+        orderBy,
+        skip,
+        take: limit
+      }),
+      prisma.timeEntry.count({ where })
+    ])
 
     // Calculate totals
     const totals = timeEntries.reduce(
@@ -49,10 +68,13 @@ export async function GET(request: NextRequest) {
       { hours: 0, amount: 0, billableHours: 0, billableAmount: 0 }
     )
 
-    return NextResponse.json({ timeEntries, totals })
+    return NextResponse.json({
+      timeEntries,
+      totals,
+      pagination: paginationMeta(total, page, limit)
+    })
   } catch (error) {
-    console.error('Time GET error:', error)
-    return NextResponse.json({ error: 'Failed to fetch time entries' }, { status: 500 })
+    return handleApiError(error)
   }
 }
 
@@ -108,7 +130,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ timeEntry }, { status: 201 })
   } catch (error) {
-    console.error('Time POST error:', error)
-    return NextResponse.json({ error: 'Failed to create time entry' }, { status: 500 })
+    return handleApiError(error)
   }
 }

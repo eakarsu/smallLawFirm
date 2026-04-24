@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
+import { getPaginationParams, paginationMeta } from '@/lib/pagination'
+import { handleApiError } from '@/lib/api-error-handler'
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,6 +15,7 @@ export async function GET(request: NextRequest) {
     const matterId = searchParams.get('matterId') || ''
     const status = searchParams.get('status') || ''
     const upcoming = searchParams.get('upcoming') || ''
+    const { page, limit, sortBy, sortOrder, skip } = getPaginationParams(request, { sortBy: 'dueDate', sortOrder: 'asc' })
 
     const where: any = {}
 
@@ -23,27 +26,44 @@ export async function GET(request: NextRequest) {
       where.status = 'PENDING'
     }
 
-    const deadlines = await prisma.deadline.findMany({
-      where,
-      include: {
-        matter: {
-          select: {
-            id: true,
-            name: true,
-            matterNumber: true,
-            client: {
-              select: { id: true, firstName: true, lastName: true, companyName: true }
+    const allowedSortFields: Record<string, any> = {
+      createdAt: { createdAt: sortOrder },
+      dueDate: { dueDate: sortOrder },
+      title: { title: sortOrder },
+      deadlineType: { deadlineType: sortOrder },
+      status: { status: sortOrder },
+    }
+
+    const orderBy = allowedSortFields[sortBy] || { dueDate: 'asc' }
+
+    const [deadlines, total] = await Promise.all([
+      prisma.deadline.findMany({
+        where,
+        include: {
+          matter: {
+            select: {
+              id: true,
+              name: true,
+              matterNumber: true,
+              client: {
+                select: { id: true, firstName: true, lastName: true, companyName: true }
+              }
             }
           }
-        }
-      },
-      orderBy: { dueDate: 'asc' }
-    })
+        },
+        orderBy,
+        skip,
+        take: limit
+      }),
+      prisma.deadline.count({ where })
+    ])
 
-    return NextResponse.json({ deadlines })
+    return NextResponse.json({
+      deadlines,
+      pagination: paginationMeta(total, page, limit)
+    })
   } catch (error) {
-    console.error('Deadlines GET error:', error)
-    return NextResponse.json({ error: 'Failed to fetch deadlines' }, { status: 500 })
+    return handleApiError(error)
   }
 }
 
@@ -71,7 +91,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ deadline }, { status: 201 })
   } catch (error) {
-    console.error('Deadline POST error:', error)
-    return NextResponse.json({ error: 'Failed to create deadline' }, { status: 500 })
+    return handleApiError(error)
   }
 }

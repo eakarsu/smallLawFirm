@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
+import { getPaginationParams, paginationMeta } from '@/lib/pagination'
+import { handleApiError } from '@/lib/api-error-handler'
 
 export async function GET(request: NextRequest) {
   try {
@@ -12,6 +14,7 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams
     const start = searchParams.get('start')
     const end = searchParams.get('end')
+    const { page, limit, sortBy, sortOrder, skip } = getPaginationParams(request, { sortBy: 'startTime', sortOrder: 'asc' })
 
     const where: any = {}
 
@@ -22,14 +25,29 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const events = await prisma.calendarEvent.findMany({
-      where,
-      include: {
-        matter: { select: { id: true, name: true, matterNumber: true } },
-        user: { select: { id: true, name: true } }
-      },
-      orderBy: { startTime: 'asc' }
-    })
+    const allowedSortFields: Record<string, any> = {
+      createdAt: { createdAt: sortOrder },
+      startTime: { startTime: sortOrder },
+      endTime: { endTime: sortOrder },
+      title: { title: sortOrder },
+      eventType: { eventType: sortOrder },
+    }
+
+    const orderBy = allowedSortFields[sortBy] || { startTime: 'asc' }
+
+    const [events, total] = await Promise.all([
+      prisma.calendarEvent.findMany({
+        where,
+        include: {
+          matter: { select: { id: true, name: true, matterNumber: true } },
+          user: { select: { id: true, name: true } }
+        },
+        orderBy,
+        skip,
+        take: limit
+      }),
+      prisma.calendarEvent.count({ where })
+    ])
 
     // Also get deadlines
     const deadlines = await prisma.deadline.findMany({
@@ -46,10 +64,13 @@ export async function GET(request: NextRequest) {
       orderBy: { dueDate: 'asc' }
     })
 
-    return NextResponse.json({ events, deadlines })
+    return NextResponse.json({
+      events,
+      deadlines,
+      pagination: paginationMeta(total, page, limit)
+    })
   } catch (error) {
-    console.error('Calendar GET error:', error)
-    return NextResponse.json({ error: 'Failed to fetch calendar events' }, { status: 500 })
+    return handleApiError(error)
   }
 }
 
@@ -79,7 +100,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ event }, { status: 201 })
   } catch (error) {
-    console.error('Calendar POST error:', error)
-    return NextResponse.json({ error: 'Failed to create event' }, { status: 500 })
+    return handleApiError(error)
   }
 }

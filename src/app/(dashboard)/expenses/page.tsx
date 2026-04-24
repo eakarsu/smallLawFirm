@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Select,
   SelectContent,
@@ -44,9 +45,16 @@ import {
   MoreHorizontal,
   Receipt,
   Trash2,
-  Edit
+  Edit,
+  Download,
+  FileText,
+  FileSpreadsheet,
 } from 'lucide-react'
 import { formatDate, formatCurrency } from '@/lib/utils'
+import { PageSkeleton } from '@/components/ui/loading-skeleton'
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog'
+import { Pagination } from '@/components/ui/pagination'
+import { SortHeader } from '@/components/ui/sort-header'
 
 interface Expense {
   id: string
@@ -74,6 +82,13 @@ interface Matter {
   id: string
   name: string
   matterNumber: string
+}
+
+interface PaginationMeta {
+  total: number
+  page: number
+  limit: number
+  totalPages: number
 }
 
 const categories = [
@@ -106,6 +121,33 @@ export default function ExpensesPage() {
   const [categoryFilter, setCategoryFilter] = useState('')
   const [billableFilter, setBillableFilter] = useState('')
 
+  // Pagination state
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
+  const [pagination, setPagination] = useState<PaginationMeta>({ total: 0, page: 1, limit: 25, totalPages: 1 })
+
+  // Sort state
+  const [sortBy, setSortBy] = useState('date')
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
+
+  // Bulk selection state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+
+  // Confirmation dialog state
+  const [confirmDialog, setConfirmDialog] = useState<{
+    open: boolean
+    title: string
+    description: string
+    variant: 'danger' | 'warning' | 'info'
+    onConfirm: () => void
+  }>({
+    open: false,
+    title: '',
+    description: '',
+    variant: 'danger',
+    onConfirm: () => {}
+  })
+
   const [formData, setFormData] = useState({
     matterId: '',
     date: new Date().toISOString().split('T')[0],
@@ -120,28 +162,38 @@ export default function ExpensesPage() {
   const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null)
   const [detailDialogOpen, setDetailDialogOpen] = useState(false)
 
-  useEffect(() => {
-    fetchExpenses()
-    fetchMatters()
-  }, [categoryFilter, billableFilter])
-
-  const fetchExpenses = async () => {
+  const fetchExpenses = useCallback(async () => {
     try {
       const params = new URLSearchParams()
-      if (categoryFilter) params.set('category', categoryFilter)
-      if (billableFilter) params.set('billableStatus', billableFilter)
+      if (categoryFilter && categoryFilter !== 'all') params.set('category', categoryFilter)
+      if (billableFilter && billableFilter !== 'all') params.set('billableStatus', billableFilter)
+      params.set('page', String(page))
+      params.set('limit', String(pageSize))
+      params.set('sortBy', sortBy)
+      params.set('sortOrder', sortOrder)
 
       const res = await fetch(`/api/expenses?${params}`)
       if (res.ok) {
         const data = await res.json()
         setExpenses(data.expenses)
+        if (data.pagination) {
+          setPagination(data.pagination)
+        }
       }
     } catch (error) {
       console.error('Failed to fetch expenses:', error)
     } finally {
       setLoading(false)
     }
-  }
+  }, [categoryFilter, billableFilter, page, pageSize, sortBy, sortOrder])
+
+  useEffect(() => {
+    fetchExpenses()
+  }, [fetchExpenses])
+
+  useEffect(() => {
+    fetchMatters()
+  }, [])
 
   const fetchMatters = async () => {
     try {
@@ -195,8 +247,6 @@ export default function ExpensesPage() {
   }
 
   const handleDeleteExpense = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this expense?')) return
-
     try {
       const res = await fetch(`/api/expenses/${id}`, {
         method: 'DELETE'
@@ -208,6 +258,38 @@ export default function ExpensesPage() {
     } catch (error) {
       console.error('Failed to delete expense:', error)
     }
+  }
+
+  const confirmDeleteExpense = (id: string) => {
+    setConfirmDialog({
+      open: true,
+      title: 'Delete Expense',
+      description: 'Are you sure you want to delete this expense? This action cannot be undone.',
+      variant: 'danger',
+      onConfirm: () => {
+        handleDeleteExpense(id)
+        setConfirmDialog(prev => ({ ...prev, open: false }))
+      }
+    })
+  }
+
+  const handleBulkDelete = () => {
+    if (selectedIds.size === 0) return
+    setConfirmDialog({
+      open: true,
+      title: 'Delete Selected Expenses',
+      description: `Are you sure you want to delete ${selectedIds.size} selected expense(s)? This action cannot be undone.`,
+      variant: 'danger',
+      onConfirm: async () => {
+        setConfirmDialog(prev => ({ ...prev, open: false }))
+        const promises = Array.from(selectedIds).map(id =>
+          fetch(`/api/expenses/${id}`, { method: 'DELETE' })
+        )
+        await Promise.all(promises)
+        setSelectedIds(new Set())
+        fetchExpenses()
+      }
+    })
   }
 
   const handleEdit = (expense: Expense) => {
@@ -238,6 +320,49 @@ export default function ExpensesPage() {
     })
   }
 
+  const handleSort = (field: string) => {
+    if (sortBy === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortBy(field)
+      setSortOrder('asc')
+    }
+    setPage(1)
+  }
+
+  const handlePageChange = (newPage: number) => {
+    setPage(newPage)
+    setSelectedIds(new Set())
+  }
+
+  const handlePageSizeChange = (newSize: number) => {
+    setPageSize(newSize)
+    setPage(1)
+    setSelectedIds(new Set())
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredExpenses.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(filteredExpenses.map(e => e.id)))
+    }
+  }
+
+  const toggleSelect = (id: string) => {
+    const newSet = new Set(selectedIds)
+    if (newSet.has(id)) {
+      newSet.delete(id)
+    } else {
+      newSet.add(id)
+    }
+    setSelectedIds(newSet)
+  }
+
+  const handleExport = (format: 'csv' | 'pdf') => {
+    window.open(`/api/export?entity=expenses&format=${format}`, '_blank')
+  }
+
   const getClientName = (client: Expense['matter']['client']) => {
     if (client.companyName) return client.companyName
     return `${client.firstName || ''} ${client.lastName || ''}`.trim() || 'N/A'
@@ -255,11 +380,7 @@ export default function ExpensesPage() {
     .reduce((sum, e) => sum + Number(e.amount), 0)
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900" />
-      </div>
-    )
+    return <PageSkeleton />
   }
 
   return (
@@ -269,147 +390,167 @@ export default function ExpensesPage() {
           <h1 className="text-2xl font-bold text-gray-900">Expenses</h1>
           <p className="text-gray-500">Track and manage case expenses</p>
         </div>
-        <Dialog open={dialogOpen} onOpenChange={(open) => {
-          setDialogOpen(open)
-          if (!open) {
-            setEditingExpense(null)
-            resetForm()
-          }
-        }}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="w-4 h-4 mr-2" />
-              New Expense
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-lg">
-            <DialogHeader>
-              <DialogTitle>{editingExpense ? 'Edit Expense' : 'New Expense'}</DialogTitle>
-              <DialogDescription>
-                {editingExpense ? 'Update expense details' : 'Record a new expense'}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label>Matter *</Label>
-                <Select
-                  value={formData.matterId}
-                  onValueChange={(v) => setFormData({ ...formData, matterId: v })}
+        <div className="flex items-center gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline">
+                <Download className="w-4 h-4 mr-2" />
+                Export
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => handleExport('csv')}>
+                <FileSpreadsheet className="mr-2 h-4 w-4" />
+                Export CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('pdf')}>
+                <FileText className="mr-2 h-4 w-4" />
+                Export PDF
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Dialog open={dialogOpen} onOpenChange={(open) => {
+            setDialogOpen(open)
+            if (!open) {
+              setEditingExpense(null)
+              resetForm()
+            }
+          }}>
+            <DialogTrigger asChild>
+              <Button>
+                <Plus className="w-4 h-4 mr-2" />
+                New Expense
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>{editingExpense ? 'Edit Expense' : 'New Expense'}</DialogTitle>
+                <DialogDescription>
+                  {editingExpense ? 'Update expense details' : 'Record a new expense'}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <div className="space-y-2">
+                  <Label>Matter *</Label>
+                  <Select
+                    value={formData.matterId}
+                    onValueChange={(v) => setFormData({ ...formData, matterId: v })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a matter" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {matters.map((matter) => (
+                        <SelectItem key={matter.id} value={matter.id}>
+                          {matter.matterNumber} - {matter.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="date">Date *</Label>
+                    <Input
+                      id="date"
+                      type="date"
+                      value={formData.date}
+                      onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="amount">Amount ($) *</Label>
+                    <Input
+                      id="amount"
+                      type="number"
+                      step="0.01"
+                      value={formData.amount}
+                      onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="description">Description *</Label>
+                  <Input
+                    id="description"
+                    value={formData.description}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Category</Label>
+                    <Select
+                      value={formData.category}
+                      onValueChange={(v) => setFormData({ ...formData, category: v })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {categories.map((cat) => (
+                          <SelectItem key={cat.value} value={cat.value}>
+                            {cat.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Billable Status</Label>
+                    <Select
+                      value={formData.billableStatus}
+                      onValueChange={(v) => setFormData({ ...formData, billableStatus: v })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {billableStatuses.map((status) => (
+                          <SelectItem key={status.value} value={status.value}>
+                            {status.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="vendor">Vendor</Label>
+                  <Input
+                    id="vendor"
+                    value={formData.vendor}
+                    onChange={(e) => setFormData({ ...formData, vendor: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="notes">Notes</Label>
+                  <Textarea
+                    id="notes"
+                    value={formData.notes}
+                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                    rows={2}
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => {
+                  setDialogOpen(false)
+                  setEditingExpense(null)
+                  resetForm()
+                }}>
+                  Cancel
+                </Button>
+                <Button
+                  onClick={editingExpense ? handleUpdateExpense : handleCreateExpense}
+                  disabled={!formData.matterId || !formData.description || !formData.amount}
                 >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a matter" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {matters.map((matter) => (
-                      <SelectItem key={matter.id} value={matter.id}>
-                        {matter.matterNumber} - {matter.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="date">Date *</Label>
-                  <Input
-                    id="date"
-                    type="date"
-                    value={formData.date}
-                    onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="amount">Amount ($) *</Label>
-                  <Input
-                    id="amount"
-                    type="number"
-                    step="0.01"
-                    value={formData.amount}
-                    onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                  />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="description">Description *</Label>
-                <Input
-                  id="description"
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Category</Label>
-                  <Select
-                    value={formData.category}
-                    onValueChange={(v) => setFormData({ ...formData, category: v })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {categories.map((cat) => (
-                        <SelectItem key={cat.value} value={cat.value}>
-                          {cat.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Billable Status</Label>
-                  <Select
-                    value={formData.billableStatus}
-                    onValueChange={(v) => setFormData({ ...formData, billableStatus: v })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {billableStatuses.map((status) => (
-                        <SelectItem key={status.value} value={status.value}>
-                          {status.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="vendor">Vendor</Label>
-                <Input
-                  id="vendor"
-                  value={formData.vendor}
-                  onChange={(e) => setFormData({ ...formData, vendor: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="notes">Notes</Label>
-                <Textarea
-                  id="notes"
-                  value={formData.notes}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  rows={2}
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => {
-                setDialogOpen(false)
-                setEditingExpense(null)
-                resetForm()
-              }}>
-                Cancel
-              </Button>
-              <Button
-                onClick={editingExpense ? handleUpdateExpense : handleCreateExpense}
-                disabled={!formData.matterId || !formData.description || !formData.amount}
-              >
-                {editingExpense ? 'Update' : 'Create'} Expense
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+                  {editingExpense ? 'Update' : 'Create'} Expense
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </div>
       </div>
 
       {/* Summary Cards */}
@@ -434,6 +575,22 @@ export default function ExpensesPage() {
         </Card>
       </div>
 
+      {/* Bulk Actions Bar */}
+      {selectedIds.size > 0 && (
+        <div className="mb-4 flex items-center gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+          <span className="text-sm font-medium text-blue-800">
+            {selectedIds.size} selected
+          </span>
+          <Button variant="destructive" size="sm" onClick={handleBulkDelete}>
+            <Trash2 className="w-4 h-4 mr-1" />
+            Delete Selected
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
+            Clear Selection
+          </Button>
+        </div>
+      )}
+
       <Card>
         <CardHeader>
           <div className="flex flex-col sm:flex-row gap-4">
@@ -446,7 +603,7 @@ export default function ExpensesPage() {
                 className="pl-10"
               />
             </div>
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <Select value={categoryFilter} onValueChange={(v) => { setCategoryFilter(v); setPage(1) }}>
               <SelectTrigger className="w-[150px]">
                 <SelectValue placeholder="Category" />
               </SelectTrigger>
@@ -457,7 +614,7 @@ export default function ExpensesPage() {
                 ))}
               </SelectContent>
             </Select>
-            <Select value={billableFilter} onValueChange={setBillableFilter}>
+            <Select value={billableFilter} onValueChange={(v) => { setBillableFilter(v); setPage(1) }}>
               <SelectTrigger className="w-[150px]">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
@@ -478,80 +635,102 @@ export default function ExpensesPage() {
               <Button onClick={() => setDialogOpen(true)}>Record Your First Expense</Button>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead>Matter</TableHead>
-                  <TableHead>Category</TableHead>
-                  <TableHead>Vendor</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="w-[50px]"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredExpenses.map((expense) => (
-                  <TableRow
-                    key={expense.id}
-                    className="cursor-pointer hover:bg-gray-50"
-                    onClick={() => {
-                      setSelectedExpense(expense)
-                      setDetailDialogOpen(true)
-                    }}
-                  >
-                    <TableCell>{formatDate(expense.date)}</TableCell>
-                    <TableCell className="font-medium">{expense.description}</TableCell>
-                    <TableCell>
-                      <Link href={`/matters/${expense.matter.id}`} className="text-blue-600 hover:underline">
-                        {expense.matter.matterNumber}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      {categories.find(c => c.value === expense.category)?.label || expense.category}
-                    </TableCell>
-                    <TableCell>{expense.vendor || '-'}</TableCell>
-                    <TableCell className="text-right font-medium">
-                      {formatCurrency(expense.amount)}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={expense.billableStatus === 'BILLABLE' ? 'default' : 'secondary'}>
-                        {expense.billableStatus}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={(e) => {
-                            e.stopPropagation()
-                            handleEdit(expense)
-                          }}>
-                            <Edit className="mr-2 h-4 w-4" />
-                            Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            className="text-red-600"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleDeleteExpense(expense.id)
-                            }}
-                          >
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[40px]">
+                      <Checkbox
+                        checked={selectedIds.size === filteredExpenses.length && filteredExpenses.length > 0}
+                        onCheckedChange={toggleSelectAll}
+                      />
+                    </TableHead>
+                    <SortHeader label="Date" field="date" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
+                    <TableHead>Description</TableHead>
+                    <TableHead>Matter</TableHead>
+                    <SortHeader label="Category" field="category" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
+                    <SortHeader label="Vendor" field="vendor" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
+                    <SortHeader label="Amount" field="amount" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} className="text-right" />
+                    <SortHeader label="Status" field="billableStatus" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
+                    <TableHead className="w-[50px]"></TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {filteredExpenses.map((expense) => (
+                    <TableRow
+                      key={expense.id}
+                      className="cursor-pointer hover:bg-gray-50"
+                      onClick={() => {
+                        setSelectedExpense(expense)
+                        setDetailDialogOpen(true)
+                      }}
+                    >
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <Checkbox
+                          checked={selectedIds.has(expense.id)}
+                          onCheckedChange={() => toggleSelect(expense.id)}
+                        />
+                      </TableCell>
+                      <TableCell>{formatDate(expense.date)}</TableCell>
+                      <TableCell className="font-medium">{expense.description}</TableCell>
+                      <TableCell>
+                        <Link href={`/matters/${expense.matter.id}`} className="text-blue-600 hover:underline" onClick={(e) => e.stopPropagation()}>
+                          {expense.matter.matterNumber}
+                        </Link>
+                      </TableCell>
+                      <TableCell>
+                        {categories.find(c => c.value === expense.category)?.label || expense.category}
+                      </TableCell>
+                      <TableCell>{expense.vendor || '-'}</TableCell>
+                      <TableCell className="text-right font-medium">
+                        {formatCurrency(expense.amount)}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={expense.billableStatus === 'BILLABLE' ? 'default' : 'secondary'}>
+                          {expense.billableStatus}
+                        </Badge>
+                      </TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={(e) => {
+                              e.stopPropagation()
+                              handleEdit(expense)
+                            }}>
+                              <Edit className="mr-2 h-4 w-4" />
+                              Edit
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              className="text-red-600"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                confirmDeleteExpense(expense.id)
+                              }}
+                            >
+                              <Trash2 className="mr-2 h-4 w-4" />
+                              Delete
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <Pagination
+                page={pagination.page}
+                totalPages={pagination.totalPages}
+                totalItems={pagination.total}
+                pageSize={pageSize}
+                onPageChange={handlePageChange}
+                onPageSizeChange={handlePageSizeChange}
+              />
+            </>
           )}
         </CardContent>
       </Card>
@@ -630,8 +809,8 @@ export default function ExpensesPage() {
               variant="destructive"
               onClick={() => {
                 if (selectedExpense) {
-                  handleDeleteExpense(selectedExpense.id)
                   setDetailDialogOpen(false)
+                  confirmDeleteExpense(selectedExpense.id)
                 }
               }}
             >
@@ -641,6 +820,17 @@ export default function ExpensesPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Confirmation Dialog */}
+      <ConfirmationDialog
+        open={confirmDialog.open}
+        onOpenChange={(open) => setConfirmDialog(prev => ({ ...prev, open }))}
+        title={confirmDialog.title}
+        description={confirmDialog.description}
+        variant={confirmDialog.variant}
+        confirmLabel={confirmDialog.variant === 'danger' ? 'Delete' : 'Confirm'}
+        onConfirm={confirmDialog.onConfirm}
+      />
     </div>
   )
 }

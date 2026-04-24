@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
+import { getPaginationParams, paginationMeta } from '@/lib/pagination'
+import { handleApiError } from '@/lib/api-error-handler'
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,6 +15,7 @@ export async function GET(request: NextRequest) {
     const matterId = searchParams.get('matterId') || ''
     const category = searchParams.get('category') || ''
     const billableStatus = searchParams.get('billableStatus') || ''
+    const { page, limit, sortBy, sortOrder, skip } = getPaginationParams(request, { sortBy: 'date' })
 
     const where: any = {}
 
@@ -20,27 +23,45 @@ export async function GET(request: NextRequest) {
     if (category && category !== 'all') where.category = category
     if (billableStatus && billableStatus !== 'all') where.billableStatus = billableStatus
 
-    const expenses = await prisma.expense.findMany({
-      where,
-      include: {
-        matter: {
-          select: {
-            id: true,
-            name: true,
-            matterNumber: true,
-            client: {
-              select: { id: true, firstName: true, lastName: true, companyName: true }
+    const allowedSortFields: Record<string, any> = {
+      createdAt: { createdAt: sortOrder },
+      date: { date: sortOrder },
+      amount: { amount: sortOrder },
+      category: { category: sortOrder },
+      vendor: { vendor: sortOrder },
+      billableStatus: { billableStatus: sortOrder },
+    }
+
+    const orderBy = allowedSortFields[sortBy] || { date: 'desc' }
+
+    const [expenses, total] = await Promise.all([
+      prisma.expense.findMany({
+        where,
+        include: {
+          matter: {
+            select: {
+              id: true,
+              name: true,
+              matterNumber: true,
+              client: {
+                select: { id: true, firstName: true, lastName: true, companyName: true }
+              }
             }
           }
-        }
-      },
-      orderBy: { date: 'desc' }
-    })
+        },
+        orderBy,
+        skip,
+        take: limit
+      }),
+      prisma.expense.count({ where })
+    ])
 
-    return NextResponse.json({ expenses })
+    return NextResponse.json({
+      expenses,
+      pagination: paginationMeta(total, page, limit)
+    })
   } catch (error) {
-    console.error('Expenses GET error:', error)
-    return NextResponse.json({ error: 'Failed to fetch expenses' }, { status: 500 })
+    return handleApiError(error)
   }
 }
 
@@ -68,7 +89,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ expense }, { status: 201 })
   } catch (error) {
-    console.error('Expense POST error:', error)
-    return NextResponse.json({ error: 'Failed to create expense' }, { status: 500 })
+    return handleApiError(error)
   }
 }

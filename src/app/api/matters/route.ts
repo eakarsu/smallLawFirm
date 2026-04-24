@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
 import { generateMatterNumber } from '@/lib/utils'
+import { getPaginationParams, paginationMeta } from '@/lib/pagination'
+import { handleApiError } from '@/lib/api-error-handler'
 
 export async function GET(request: NextRequest) {
   try {
@@ -15,6 +17,7 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status') || ''
     const caseType = searchParams.get('caseType') || ''
     const clientId = searchParams.get('clientId') || ''
+    const { page, limit, sortBy, sortOrder, skip } = getPaginationParams(request, { sortBy: 'createdAt' })
 
     const where: any = {}
 
@@ -30,36 +33,45 @@ export async function GET(request: NextRequest) {
     if (caseType) where.caseType = caseType
     if (clientId) where.clientId = clientId
 
-    const matters = await prisma.matter.findMany({
-      where,
-      include: {
-        client: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            companyName: true,
-            type: true
-          }
-        },
-        leadAttorney: {
-          select: { id: true, name: true }
-        },
-        _count: {
-          select: {
-            documents: true,
-            timeEntries: true,
-            tasks: true
-          }
-        }
-      },
-      orderBy: { createdAt: 'desc' }
-    })
+    const allowedSortFields: Record<string, any> = {
+      createdAt: { createdAt: sortOrder },
+      matterNumber: { matterNumber: sortOrder },
+      name: { name: sortOrder },
+      caseType: { caseType: sortOrder },
+      status: { status: sortOrder },
+      priority: { priority: sortOrder },
+      openDate: { openDate: sortOrder },
+    }
 
-    return NextResponse.json({ matters })
+    const orderBy = allowedSortFields[sortBy] || { createdAt: 'desc' }
+
+    const [matters, total] = await Promise.all([
+      prisma.matter.findMany({
+        where,
+        include: {
+          client: {
+            select: { id: true, firstName: true, lastName: true, companyName: true, type: true }
+          },
+          leadAttorney: {
+            select: { id: true, name: true }
+          },
+          _count: {
+            select: { documents: true, timeEntries: true, tasks: true }
+          }
+        },
+        orderBy,
+        skip,
+        take: limit
+      }),
+      prisma.matter.count({ where })
+    ])
+
+    return NextResponse.json({
+      matters,
+      pagination: paginationMeta(total, page, limit)
+    })
   } catch (error) {
-    console.error('Matters GET error:', error)
-    return NextResponse.json({ error: 'Failed to fetch matters' }, { status: 500 })
+    return handleApiError(error)
   }
 }
 
@@ -92,15 +104,11 @@ export async function POST(request: NextRequest) {
         contingencyPercent: body.contingencyPercent ? parseFloat(body.contingencyPercent) : null,
         estimatedValue: body.estimatedValue ? parseFloat(body.estimatedValue) : null
       },
-      include: {
-        client: true,
-        leadAttorney: true
-      }
+      include: { client: true, leadAttorney: true }
     })
 
     return NextResponse.json({ matter }, { status: 201 })
   } catch (error) {
-    console.error('Matter POST error:', error)
-    return NextResponse.json({ error: 'Failed to create matter' }, { status: 500 })
+    return handleApiError(error)
   }
 }

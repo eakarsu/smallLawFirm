@@ -1,10 +1,11 @@
 "use client"
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Select,
   SelectContent,
@@ -31,8 +32,18 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Plus, Clock, DollarSign, Timer } from 'lucide-react'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Plus, Clock, DollarSign, Timer, Download, FileText, Trash2 } from 'lucide-react'
 import { formatDate, formatCurrency } from '@/lib/utils'
+import { Pagination } from '@/components/ui/pagination'
+import { SortHeader } from '@/components/ui/sort-header'
+import { PageSkeleton } from '@/components/ui/loading-skeleton'
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog'
 
 interface TimeEntry {
   id: string
@@ -59,6 +70,13 @@ interface Totals {
   billableAmount: number
 }
 
+interface PaginationData {
+  total: number
+  page: number
+  limit: number
+  totalPages: number
+}
+
 const billableStatuses = [
   { value: 'BILLABLE', label: 'Billable' },
   { value: 'NON_BILLABLE', label: 'Non-Billable' },
@@ -76,6 +94,25 @@ export default function TimeTrackingPage() {
   const [timerRunning, setTimerRunning] = useState(false)
   const [timerSeconds, setTimerSeconds] = useState(0)
 
+  // Pagination state
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
+  const [pagination, setPagination] = useState<PaginationData>({ total: 0, page: 1, limit: 25, totalPages: 0 })
+
+  // Sort state
+  const [sortBy, setSortBy] = useState('date')
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
+
+  // Bulk selection state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+
+  // Confirmation dialog state
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null)
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false)
+  const [bulkUpdateDialogOpen, setBulkUpdateDialogOpen] = useState(false)
+  const [bulkUpdateStatus, setBulkUpdateStatus] = useState('BILLABLE')
+
   const [formData, setFormData] = useState({
     matterId: '',
     date: new Date().toISOString().split('T')[0],
@@ -85,8 +122,33 @@ export default function TimeTrackingPage() {
     rate: ''
   })
 
+  const fetchTimeEntries = useCallback(async () => {
+    try {
+      const params = new URLSearchParams()
+      params.set('page', String(page))
+      params.set('limit', String(pageSize))
+      params.set('sortBy', sortBy)
+      params.set('sortOrder', sortOrder)
+
+      const res = await fetch(`/api/time?${params}`)
+      if (res.ok) {
+        const data = await res.json()
+        setTimeEntries(data.timeEntries)
+        setTotals(data.totals)
+        if (data.pagination) setPagination(data.pagination)
+      }
+    } catch (error) {
+      console.error('Failed to fetch time entries:', error)
+    } finally {
+      setLoading(false)
+    }
+  }, [page, pageSize, sortBy, sortOrder])
+
   useEffect(() => {
     fetchTimeEntries()
+  }, [fetchTimeEntries])
+
+  useEffect(() => {
     fetchMatters()
   }, [])
 
@@ -99,21 +161,6 @@ export default function TimeTrackingPage() {
     }
     return () => clearInterval(interval)
   }, [timerRunning])
-
-  const fetchTimeEntries = async () => {
-    try {
-      const res = await fetch('/api/time')
-      if (res.ok) {
-        const data = await res.json()
-        setTimeEntries(data.timeEntries)
-        setTotals(data.totals)
-      }
-    } catch (error) {
-      console.error('Failed to fetch time entries:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
 
   const fetchMatters = async () => {
     try {
@@ -167,18 +214,91 @@ export default function TimeTrackingPage() {
     setDialogOpen(true)
   }
 
+  const handleSort = (field: string) => {
+    if (sortBy === field) {
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortBy(field)
+      setSortOrder('asc')
+    }
+    setPage(1)
+  }
+
+  const handleDelete = async (id: string) => {
+    try {
+      const res = await fetch(`/api/time/${id}`, { method: 'DELETE' })
+      if (res.ok) {
+        fetchTimeEntries()
+        setDeleteDialogOpen(false)
+        setDeleteTarget(null)
+      }
+    } catch (error) {
+      console.error('Failed to delete time entry:', error)
+    }
+  }
+
+  const handleBulkDelete = async () => {
+    try {
+      const res = await fetch('/api/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', entity: 'timeEntries', ids: Array.from(selectedIds) })
+      })
+      if (res.ok) {
+        setSelectedIds(new Set())
+        setBulkDeleteDialogOpen(false)
+        fetchTimeEntries()
+      }
+    } catch (error) {
+      console.error('Bulk delete failed:', error)
+    }
+  }
+
+  const handleBulkUpdate = async () => {
+    try {
+      const res = await fetch('/api/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update', entity: 'timeEntries', ids: Array.from(selectedIds), data: { billableStatus: bulkUpdateStatus } })
+      })
+      if (res.ok) {
+        setSelectedIds(new Set())
+        setBulkUpdateDialogOpen(false)
+        fetchTimeEntries()
+      }
+    } catch (error) {
+      console.error('Bulk update failed:', error)
+    }
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === timeEntries.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(timeEntries.map(e => e.id)))
+    }
+  }
+
+  const toggleSelect = (id: string) => {
+    const newSet = new Set(selectedIds)
+    if (newSet.has(id)) {
+      newSet.delete(id)
+    } else {
+      newSet.add(id)
+    }
+    setSelectedIds(newSet)
+  }
+
+  const handleExport = (format: 'csv' | 'pdf') => {
+    window.open(`/api/export?entity=timeEntries&format=${format}`, '_blank')
+  }
+
   const handleRowClick = (entry: TimeEntry) => {
     setSelectedEntry(entry)
     setDetailDialogOpen(true)
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900" />
-      </div>
-    )
-  }
+  if (loading) return <PageSkeleton />
 
   return (
     <div className="p-8">
@@ -188,6 +308,24 @@ export default function TimeTrackingPage() {
           <p className="text-gray-500">Track and manage billable hours</p>
         </div>
         <div className="flex gap-3">
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline">
+                <Download className="w-4 h-4 mr-2" />
+                Export
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              <DropdownMenuItem onClick={() => handleExport('csv')}>
+                <FileText className="mr-2 h-4 w-4" />
+                Export CSV
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('pdf')}>
+                <FileText className="mr-2 h-4 w-4" />
+                Export PDF
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           {timerRunning ? (
             <Button variant="destructive" onClick={stopTimer}>
               <Timer className="w-4 h-4 mr-2" />
@@ -355,6 +493,23 @@ export default function TimeTrackingPage() {
         </Card>
       </div>
 
+      {/* Bulk Actions */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-3 mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+          <span className="text-sm font-medium text-blue-700">{selectedIds.size} selected</span>
+          <Button size="sm" variant="outline" onClick={() => setBulkUpdateDialogOpen(true)}>
+            Update Status
+          </Button>
+          <Button size="sm" variant="destructive" onClick={() => setBulkDeleteDialogOpen(true)}>
+            <Trash2 className="w-3 h-3 mr-1" />
+            Delete Selected
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>
+            Clear Selection
+          </Button>
+        </div>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle>Time Entries</CardTitle>
@@ -367,44 +522,63 @@ export default function TimeTrackingPage() {
               <Button onClick={() => setDialogOpen(true)}>Add Your First Entry</Button>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Matter</TableHead>
-                  <TableHead>Description</TableHead>
-                  <TableHead>Hours</TableHead>
-                  <TableHead>Rate</TableHead>
-                  <TableHead>Amount</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {timeEntries.map((entry) => (
-                  <TableRow
-                    key={entry.id}
-                    className="cursor-pointer hover:bg-gray-50"
-                    onClick={() => handleRowClick(entry)}
-                  >
-                    <TableCell>{formatDate(entry.date)}</TableCell>
-                    <TableCell>
-                      <span className="font-mono text-sm">{entry.matter.matterNumber}</span>
-                      <br />
-                      <span className="text-sm text-gray-500">{entry.matter.name}</span>
-                    </TableCell>
-                    <TableCell className="max-w-md truncate">{entry.description}</TableCell>
-                    <TableCell>{Number(entry.hours).toFixed(1)}</TableCell>
-                    <TableCell>{formatCurrency(entry.rate)}</TableCell>
-                    <TableCell>{formatCurrency(entry.amount)}</TableCell>
-                    <TableCell>
-                      <Badge variant={entry.billableStatus === 'BILLABLE' ? 'success' : 'secondary'}>
-                        {entry.billableStatus.replace('_', ' ')}
-                      </Badge>
-                    </TableCell>
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[40px]">
+                      <Checkbox
+                        checked={selectedIds.size === timeEntries.length && timeEntries.length > 0}
+                        onCheckedChange={toggleSelectAll}
+                      />
+                    </TableHead>
+                    <SortHeader label="Date" field="date" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
+                    <TableHead>Matter</TableHead>
+                    <TableHead>Description</TableHead>
+                    <SortHeader label="Hours" field="hours" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
+                    <SortHeader label="Rate" field="rate" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
+                    <SortHeader label="Amount" field="amount" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
+                    <SortHeader label="Status" field="billableStatus" currentSort={sortBy} currentOrder={sortOrder} onSort={handleSort} />
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {timeEntries.map((entry) => (
+                    <TableRow
+                      key={entry.id}
+                      className="cursor-pointer hover:bg-gray-50"
+                      onClick={() => handleRowClick(entry)}
+                    >
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <Checkbox checked={selectedIds.has(entry.id)} onCheckedChange={() => toggleSelect(entry.id)} />
+                      </TableCell>
+                      <TableCell>{formatDate(entry.date)}</TableCell>
+                      <TableCell>
+                        <span className="font-mono text-sm">{entry.matter.matterNumber}</span>
+                        <br />
+                        <span className="text-sm text-gray-500">{entry.matter.name}</span>
+                      </TableCell>
+                      <TableCell className="max-w-md truncate">{entry.description}</TableCell>
+                      <TableCell>{Number(entry.hours).toFixed(1)}</TableCell>
+                      <TableCell>{formatCurrency(entry.rate)}</TableCell>
+                      <TableCell>{formatCurrency(entry.amount)}</TableCell>
+                      <TableCell>
+                        <Badge variant={entry.billableStatus === 'BILLABLE' ? 'success' : 'secondary'}>
+                          {entry.billableStatus.replace('_', ' ')}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <Pagination
+                page={pagination.page}
+                totalPages={pagination.totalPages}
+                totalItems={pagination.total}
+                pageSize={pageSize}
+                onPageChange={setPage}
+                onPageSizeChange={(size) => { setPageSize(size); setPage(1) }}
+              />
+            </>
           )}
         </CardContent>
       </Card>
@@ -469,8 +643,66 @@ export default function TimeTrackingPage() {
                 <h3 className="text-sm font-semibold text-gray-900 mb-2">Description</h3>
                 <p className="text-sm text-gray-700 bg-gray-50 p-3 rounded">{selectedEntry.description}</p>
               </div>
+
+              {/* Actions */}
+              <div className="flex justify-end gap-3 pt-4 border-t">
+                <Button variant="destructive" onClick={() => {
+                  setDetailDialogOpen(false)
+                  setDeleteTarget({ id: selectedEntry.id, name: `${formatDate(selectedEntry.date)} - ${selectedEntry.matter.matterNumber}` })
+                  setDeleteDialogOpen(true)
+                }}>
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Delete
+                </Button>
+              </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmationDialog
+        open={deleteDialogOpen}
+        onOpenChange={setDeleteDialogOpen}
+        title="Delete Time Entry"
+        description={`Are you sure you want to delete "${deleteTarget?.name}"? This action cannot be undone.`}
+        confirmLabel="Delete Entry"
+        variant="danger"
+        onConfirm={() => deleteTarget && handleDelete(deleteTarget.id)}
+      />
+
+      {/* Bulk Delete Confirmation */}
+      <ConfirmationDialog
+        open={bulkDeleteDialogOpen}
+        onOpenChange={setBulkDeleteDialogOpen}
+        title="Delete Selected Time Entries"
+        description={`Are you sure you want to delete ${selectedIds.size} selected time entry(ies)? This action cannot be undone.`}
+        confirmLabel={`Delete ${selectedIds.size} Entries`}
+        variant="danger"
+        onConfirm={handleBulkDelete}
+      />
+
+      {/* Bulk Update Dialog */}
+      <Dialog open={bulkUpdateDialogOpen} onOpenChange={setBulkUpdateDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Update {selectedIds.size} Time Entry(ies)</DialogTitle>
+            <DialogDescription>Change the billable status of selected entries</DialogDescription>
+          </DialogHeader>
+          <div className="py-4">
+            <Select value={bulkUpdateStatus} onValueChange={setBulkUpdateStatus}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="BILLABLE">Billable</SelectItem>
+                <SelectItem value="NON_BILLABLE">Non-Billable</SelectItem>
+                <SelectItem value="NO_CHARGE">No Charge</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setBulkUpdateDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleBulkUpdate}>Update {selectedIds.size} Entries</Button>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

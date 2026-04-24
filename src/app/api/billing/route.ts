@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
 import { generateInvoiceNumber } from '@/lib/utils'
+import { getPaginationParams, paginationMeta } from '@/lib/pagination'
+import { handleApiError } from '@/lib/api-error-handler'
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,6 +16,7 @@ export async function GET(request: NextRequest) {
     const status = searchParams.get('status') || ''
     const clientId = searchParams.get('clientId') || ''
     const search = searchParams.get('search') || ''
+    const { page, limit, sortBy, sortOrder, skip } = getPaginationParams(request, { sortBy: 'createdAt' })
 
     const where: any = {}
     if (status && status !== 'all') where.status = status
@@ -29,24 +32,40 @@ export async function GET(request: NextRequest) {
       ]
     }
 
-    const invoices = await prisma.invoice.findMany({
-      where,
-      include: {
-        client: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            companyName: true,
-            type: true
+    const allowedSortFields: Record<string, any> = {
+      createdAt: { createdAt: sortOrder },
+      invoiceNumber: { invoiceNumber: sortOrder },
+      issueDate: { issueDate: sortOrder },
+      dueDate: { dueDate: sortOrder },
+      total: { total: sortOrder },
+      status: { status: sortOrder },
+    }
+
+    const orderBy = allowedSortFields[sortBy] || { createdAt: 'desc' }
+
+    const [invoices, total] = await Promise.all([
+      prisma.invoice.findMany({
+        where,
+        include: {
+          client: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              companyName: true,
+              type: true
+            }
+          },
+          matter: {
+            select: { id: true, name: true, matterNumber: true }
           }
         },
-        matter: {
-          select: { id: true, name: true, matterNumber: true }
-        }
-      },
-      orderBy: { createdAt: 'desc' }
-    })
+        orderBy,
+        skip,
+        take: limit
+      }),
+      prisma.invoice.count({ where })
+    ])
 
     // Calculate stats
     const now = new Date()
@@ -71,11 +90,11 @@ export async function GET(request: NextRequest) {
         totalPaid: paidThisMonth,
         overdueAmount: overdue,
         invoiceCount: invoices.filter(i => !['PAID', 'CANCELLED'].includes(i.status)).length
-      }
+      },
+      pagination: paginationMeta(total, page, limit)
     })
   } catch (error) {
-    console.error('Billing GET error:', error)
-    return NextResponse.json({ error: 'Failed to fetch invoices' }, { status: 500 })
+    return handleApiError(error)
   }
 }
 
@@ -106,7 +125,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ invoice }, { status: 201 })
   } catch (error) {
-    console.error('Billing POST error:', error)
-    return NextResponse.json({ error: 'Failed to create invoice' }, { status: 500 })
+    return handleApiError(error)
   }
 }

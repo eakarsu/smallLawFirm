@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Scale } from 'lucide-react'
+import { PasswordStrength, getPasswordStrength } from '@/components/ui/password-strength'
 
 const roles = [
   { value: 'ADMIN', label: 'Administrator' },
@@ -24,13 +25,33 @@ export default function RegisterPage() {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [role, setRole] = useState('ATTORNEY')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
+  const { score: passwordScore } = getPasswordStrength(password)
+
+  const validateForm = (): string | null => {
+    if (!name.trim()) return 'Name is required'
+    if (!email.trim()) return 'Email is required'
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Please enter a valid email address'
+    if (password.length < 8) return 'Password must be at least 8 characters'
+    if (passwordScore < 3) return 'Password is too weak. Add uppercase, lowercase, numbers, and special characters.'
+    if (password !== confirmPassword) return 'Passwords do not match'
+    return null
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+
+    const validationError = validateForm()
+    if (validationError) {
+      setError(validationError)
+      return
+    }
+
     setLoading(true)
 
     try {
@@ -97,6 +118,9 @@ export default function RegisterPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
               />
+              {email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && (
+                <p className="text-xs text-red-500">Please enter a valid email address</p>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
@@ -106,8 +130,22 @@ export default function RegisterPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                minLength={6}
+                minLength={8}
               />
+              <PasswordStrength password={password} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="confirmPassword">Confirm Password</Label>
+              <Input
+                id="confirmPassword"
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                required
+              />
+              {confirmPassword && password !== confirmPassword && (
+                <p className="text-xs text-red-500">Passwords do not match</p>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="role">Role</Label>
@@ -126,7 +164,7 @@ export default function RegisterPage() {
             </div>
           </CardContent>
           <CardFooter className="flex flex-col space-y-4">
-            <Button type="submit" className="w-full" disabled={loading}>
+            <Button type="submit" className="w-full" disabled={loading || passwordScore < 3}>
               {loading ? 'Creating Account...' : 'Create Account'}
             </Button>
             <p className="text-sm text-center text-gray-600">

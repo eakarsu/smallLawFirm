@@ -4,6 +4,8 @@ import { getCurrentUser } from '@/lib/auth'
 import { writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 import { v4 as uuidv4 } from 'uuid'
+import { getPaginationParams, paginationMeta } from '@/lib/pagination'
+import { handleApiError } from '@/lib/api-error-handler'
 
 export async function GET(request: NextRequest) {
   try {
@@ -17,6 +19,7 @@ export async function GET(request: NextRequest) {
     const category = searchParams.get('category') || ''
     const matterId = searchParams.get('matterId') || ''
     const clientId = searchParams.get('clientId') || ''
+    const { page, limit, sortBy, sortOrder, skip } = getPaginationParams(request, { sortBy: 'createdAt' })
 
     const where: any = {}
 
@@ -31,20 +34,37 @@ export async function GET(request: NextRequest) {
     if (matterId) where.matterId = matterId
     if (clientId) where.clientId = clientId
 
-    const documents = await prisma.document.findMany({
-      where,
-      include: {
-        matter: { select: { id: true, name: true, matterNumber: true } },
-        client: { select: { id: true, firstName: true, lastName: true, companyName: true } },
-        uploadedBy: { select: { id: true, name: true } }
-      },
-      orderBy: { createdAt: 'desc' }
-    })
+    const allowedSortFields: Record<string, any> = {
+      createdAt: { createdAt: sortOrder },
+      name: { name: sortOrder },
+      category: { category: sortOrder },
+      fileSize: { fileSize: sortOrder },
+      fileType: { fileType: sortOrder },
+    }
 
-    return NextResponse.json({ documents })
+    const orderBy = allowedSortFields[sortBy] || { createdAt: 'desc' }
+
+    const [documents, total] = await Promise.all([
+      prisma.document.findMany({
+        where,
+        include: {
+          matter: { select: { id: true, name: true, matterNumber: true } },
+          client: { select: { id: true, firstName: true, lastName: true, companyName: true } },
+          uploadedBy: { select: { id: true, name: true } }
+        },
+        orderBy,
+        skip,
+        take: limit
+      }),
+      prisma.document.count({ where })
+    ])
+
+    return NextResponse.json({
+      documents,
+      pagination: paginationMeta(total, page, limit)
+    })
   } catch (error) {
-    console.error('Documents GET error:', error)
-    return NextResponse.json({ error: 'Failed to fetch documents' }, { status: 500 })
+    return handleApiError(error)
   }
 }
 
@@ -99,7 +119,6 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ document }, { status: 201 })
   } catch (error) {
-    console.error('Document POST error:', error)
-    return NextResponse.json({ error: 'Failed to upload document' }, { status: 500 })
+    return handleApiError(error)
   }
 }

@@ -4,6 +4,7 @@ import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Sidebar } from '@/components/layout/sidebar'
 import { NotificationsDropdown } from '@/components/layout/notifications-dropdown'
+import { ErrorBoundary } from '@/components/error-boundary'
 import { useAuthStore } from '@/stores/auth-store'
 
 export default function DashboardLayout({
@@ -45,7 +46,9 @@ export default function DashboardLayout({
           <NotificationsDropdown />
         </header>
         <main className="flex-1 overflow-y-auto">
-          {children}
+          <ErrorBoundary>
+            {children}
+          </ErrorBoundary>
         </main>
       </div>
     </div>

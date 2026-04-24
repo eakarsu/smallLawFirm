@@ -5,18 +5,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
-  Users,
-  Briefcase,
-  FileText,
-  Clock,
-  DollarSign,
-  AlertTriangle,
-  Calendar,
-  Plus,
-  ArrowRight
+  Users, Briefcase, FileText, Clock, DollarSign, AlertTriangle, Calendar, Plus, ArrowRight
 } from 'lucide-react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { formatCurrency, formatDate } from '@/lib/utils'
+import { DashboardSkeleton } from '@/components/ui/loading-skeleton'
 
 interface DashboardStats {
   totalClients: number
@@ -44,6 +38,7 @@ interface UpcomingDeadline {
 }
 
 export default function DashboardPage() {
+  const router = useRouter()
   const [stats, setStats] = useState<DashboardStats>({
     totalClients: 0,
     activeMatters: 0,
@@ -81,16 +76,16 @@ export default function DashboardPage() {
     { name: 'Open Matters', value: stats.activeMatters, icon: Briefcase, href: '/matters', color: 'bg-green-500' },
     { name: 'Pending Tasks', value: stats.pendingTasks, icon: FileText, href: '/tasks', color: 'bg-yellow-500' },
     { name: 'Unbilled Hours', value: stats.unbilledHours.toFixed(1), icon: Clock, href: '/time', color: 'bg-purple-500' },
-    { name: 'Upcoming Deadlines', value: stats.upcomingDeadlines, icon: AlertTriangle, href: '/calendar', color: 'bg-red-500' },
+    { name: 'Upcoming Deadlines', value: stats.upcomingDeadlines, icon: AlertTriangle, href: '/deadlines', color: 'bg-red-500' },
     { name: 'Revenue (MTD)', value: formatCurrency(stats.totalRevenue), icon: DollarSign, href: '/billing', color: 'bg-emerald-500' },
   ]
 
+  const handleCardClick = (href: string) => {
+    router.push(href)
+  }
+
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900" />
-      </div>
-    )
+    return <DashboardSkeleton />
   }
 
   return (
@@ -116,24 +111,26 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Stats Grid */}
+      {/* Stats Grid - clickable cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
         {statCards.map((stat) => (
-          <Link key={stat.name} href={stat.href}>
-            <Card className="hover:shadow-lg transition-shadow cursor-pointer">
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-gray-500">{stat.name}</p>
-                    <p className="text-2xl font-bold text-gray-900 mt-1">{stat.value}</p>
-                  </div>
-                  <div className={`w-12 h-12 ${stat.color} rounded-lg flex items-center justify-center`}>
-                    <stat.icon className="w-6 h-6 text-white" />
-                  </div>
+          <Card
+            key={stat.name}
+            className="hover:shadow-lg transition-shadow cursor-pointer"
+            onClick={() => handleCardClick(stat.href)}
+          >
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-500">{stat.name}</p>
+                  <p className="text-2xl font-bold text-gray-900 mt-1">{stat.value}</p>
                 </div>
-              </CardContent>
-            </Card>
-          </Link>
+                <div className={`w-12 h-12 ${stat.color} rounded-lg flex items-center justify-center`}>
+                  <stat.icon className="w-6 h-6 text-white" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         ))}
       </div>
 
@@ -146,7 +143,7 @@ export default function DashboardPage() {
               <CardDescription>Don&apos;t miss these important dates</CardDescription>
             </div>
             <Button variant="ghost" size="sm" asChild>
-              <Link href="/calendar">
+              <Link href="/deadlines">
                 View All <ArrowRight className="w-4 h-4 ml-1" />
               </Link>
             </Button>
@@ -157,7 +154,11 @@ export default function DashboardPage() {
             ) : (
               <div className="space-y-4">
                 {deadlines.map((deadline) => (
-                  <div key={deadline.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div
+                    key={deadline.id}
+                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors"
+                    onClick={() => router.push('/deadlines')}
+                  >
                     <div className="flex items-center gap-3">
                       <Calendar className="w-5 h-5 text-gray-400" />
                       <div>
@@ -191,7 +192,22 @@ export default function DashboardPage() {
             ) : (
               <div className="space-y-4">
                 {recentActivity.map((activity) => (
-                  <div key={activity.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                  <div
+                    key={activity.id}
+                    className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors"
+                    onClick={() => {
+                      const routeMap: Record<string, string> = {
+                        matter: '/matters',
+                        client: '/clients',
+                        document: '/documents',
+                        task: '/tasks',
+                        billing: '/billing',
+                        deadline: '/deadlines',
+                      }
+                      const route = routeMap[activity.type] || '/dashboard'
+                      router.push(route)
+                    }}
+                  >
                     <div className="w-2 h-2 mt-2 rounded-full bg-blue-500" />
                     <div className="flex-1">
                       <p className="font-medium text-gray-900">{activity.title}</p>
