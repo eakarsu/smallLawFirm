@@ -45,6 +45,7 @@ const navigation = [
   { name: 'Expenses', href: '/expenses', icon: Receipt },
   { name: 'Billing', href: '/billing', icon: DollarSign },
   { name: 'Court Filings', href: '/filings', icon: Gavel },
+  { name: 'Service Tracker', href: '/filing-service-tracker', icon: Gavel },
   { name: 'Messages', href: '/messages', icon: MessageSquare },
   { name: 'Notifications', href: '/notifications', icon: Bell },
   { name: 'AI Assistant', href: '/ai', icon: Brain },
