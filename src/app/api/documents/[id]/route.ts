@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
-import { unlink } from 'fs/promises'
-import { join } from 'path'
 
 export async function GET(
   request: NextRequest,
@@ -73,46 +71,11 @@ export async function PUT(
 }
 
 export async function DELETE(
-  request: NextRequest,
+  _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  try {
-    const user = await getCurrentUser()
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const { id } = await params
-
-    // Get document to find file path
-    const document = await prisma.document.findUnique({
-      where: { id },
-      select: { filePath: true }
-    })
-
-    if (!document) {
-      return NextResponse.json({ error: 'Document not found' }, { status: 404 })
-    }
-
-    // Delete from database
-    await prisma.document.delete({
-      where: { id }
-    })
-
-    // Try to delete file from disk
-    if (document.filePath) {
-      try {
-        const fullPath = join(process.cwd(), document.filePath)
-        await unlink(fullPath)
-      } catch (fileError) {
-        console.error('Failed to delete file:', fileError)
-        // Continue even if file deletion fails
-      }
-    }
-
-    return NextResponse.json({ success: true })
-  } catch (error) {
-    console.error('Document DELETE error:', error)
-    return NextResponse.json({ error: 'Failed to delete document' }, { status: 500 })
-  }
+  await params
+  return NextResponse.json({
+    error: 'Permanent document deletion is disabled. Governed evidence must use legal-hold-aware retention disposition.',
+  }, { status: 409 })
 }

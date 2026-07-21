@@ -14,7 +14,7 @@ model User {
   email         String    @unique
   name          String
   password      String
-  role          UserRole  @default(ATTORNEY)
+  role          UserRole  @default(SECRETARY)
   phone         String?
   barNumber     String?
   department    String?
@@ -44,6 +44,7 @@ model User {
   notifications     Notification[]
   assignedTasks     Task[]          @relation("TaskAssignee")
   createdClients    Client[]        @relation("ClientCreator")
+  governedFilingsCreated GovernedFilingPackage[] @relation("GovernedFilingCreator")
 
   @@map("users")
 }
@@ -232,6 +233,7 @@ model Matter {
   conflicts       ConflictCheck[]
   notes           MatterNote[]
   aiRequests      AIRequest[]
+  governedFilingPackages GovernedFilingPackage[]
 
   @@map("matters")
 }
@@ -412,6 +414,70 @@ model DocumentTemplate {
   updatedAt   DateTime @updatedAt
 
   @@map("document_templates")
+}
+
+// ==================== GOVERNED FILING PACKAGES ====================
+
+model GovernedFilingPackage {
+  id              String   @id @default(cuid())
+  matterId        String
+  matter          Matter   @relation(fields: [matterId], references: [id], onDelete: Restrict)
+  createdById     String
+  createdBy       User     @relation("GovernedFilingCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  title           String
+  jurisdiction    String
+  status          String
+  version         Int      @default(1)
+  state           Json
+  retentionUntil  DateTime
+  disposedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  documentVersions GovernedDocumentVersion[]
+  auditEvents      GovernedFilingAuditEvent[]
+
+  @@index([matterId, status])
+  @@map("governed_filing_packages")
+}
+
+model GovernedDocumentVersion {
+  id               String   @id @default(cuid())
+  packageId        String
+  filingPackage    GovernedFilingPackage @relation(fields: [packageId], references: [id], onDelete: Restrict)
+  documentId       String
+  version          Int
+  contentHash      String
+  storageProvider  String
+  storageReference String
+  sourceReference  String
+  ocrProvider      String
+  ocrReference     String
+  privileged       Boolean  @default(false)
+  createdAt        DateTime @default(now())
+
+  @@unique([packageId, documentId, version])
+  @@unique([packageId, documentId, contentHash])
+  @@index([packageId, privileged])
+  @@map("governed_document_versions")
+}
+
+model GovernedFilingAuditEvent {
+  id            String   @id @default(cuid())
+  packageId     String
+  filingPackage GovernedFilingPackage @relation(fields: [packageId], references: [id], onDelete: Restrict)
+  matterId      String
+  sequence      Int
+  actorId       String
+  action        String
+  payload       Json
+  previousHash  String
+  eventHash     String   @unique
+  createdAt     DateTime @default(now())
+
+  @@unique([packageId, sequence])
+  @@index([matterId, packageId, sequence])
+  @@map("governed_filing_audit_events")
 }
 
 // ==================== CALENDAR & DEADLINES ====================

@@ -1,0 +1,54 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: ci-${{ github.run_id }}-${{ github.run_attempt }}-database-password
+          POSTGRES_DB: small_law_firm_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app -d small_law_firm_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://app:ci-${{ github.run_id }}-${{ github.run_attempt }}-database-password@127.0.0.1:5432/small_law_firm_ci
+      TEST_DATABASE_URL: postgresql://app:ci-${{ github.run_id }}-${{ github.run_attempt }}-database-password@127.0.0.1:5432/small_law_firm_ci
+      NEXTAUTH_SECRET: ci-${{ github.run_id }}-${{ github.run_attempt }}-authentication-secret-with-32-bytes
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Apply schema and replay additive migration
+        run: |
+          npx prisma db push --skip-generate
+          npx prisma db execute --file prisma/migrations/20260720090000_governed_filing_workflow/migration.sql --schema prisma/schema.prisma
+          npx prisma db execute --file prisma/migrations/20260720090000_governed_filing_workflow/migration.sql --schema prisma/schema.prisma
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: npm audit --audit-level=low
+      - run: bash -n start.sh
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

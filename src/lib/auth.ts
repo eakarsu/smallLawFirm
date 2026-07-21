@@ -3,7 +3,14 @@ import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import { cookies } from 'next/headers'
 
-const JWT_SECRET = process.env.NEXTAUTH_SECRET || 'your-secret-key'
+const TOKEN_ISSUER = 'small-law-firm'
+const TOKEN_AUDIENCE = 'small-law-firm-web'
+
+function jwtSecret(): string {
+  const value = process.env.NEXTAUTH_SECRET
+  if (!value || value.length < 32) throw new Error('NEXTAUTH_SECRET must contain at least 32 characters')
+  return value
+}
 
 export interface UserPayload {
   id: string
@@ -21,12 +28,21 @@ export async function verifyPassword(password: string, hashedPassword: string): 
 }
 
 export function generateToken(user: UserPayload): string {
-  return jwt.sign(user, JWT_SECRET, { expiresIn: '7d' })
+  return jwt.sign(user, jwtSecret(), {
+    algorithm: 'HS256',
+    audience: TOKEN_AUDIENCE,
+    expiresIn: '8h',
+    issuer: TOKEN_ISSUER,
+  })
 }
 
 export function verifyToken(token: string): UserPayload | null {
   try {
-    return jwt.verify(token, JWT_SECRET) as UserPayload
+    return jwt.verify(token, jwtSecret(), {
+      algorithms: ['HS256'],
+      audience: TOKEN_AUDIENCE,
+      issuer: TOKEN_ISSUER,
+    }) as UserPayload
   } catch {
     return null
   }
@@ -44,10 +60,11 @@ export async function getCurrentUser(): Promise<UserPayload | null> {
 
     const user = await prisma.user.findUnique({
       where: { id: payload.id },
-      select: { id: true, email: true, name: true, role: true }
+      select: { id: true, email: true, name: true, role: true, isActive: true }
     })
 
-    return user ? { ...user } : null
+    if (!user?.isActive) return null
+    return { id: user.id, email: user.email, name: user.name, role: user.role }
   } catch {
     return null
   }
@@ -86,8 +103,8 @@ export async function register(data: {
   email: string
   password: string
   name: string
-  role?: string
 }) {
+  if (data.password.length < 12) throw new Error('Password must be at least 12 characters')
   const existingUser = await prisma.user.findUnique({
     where: { email: data.email }
   })
@@ -103,7 +120,7 @@ export async function register(data: {
       email: data.email,
       password: hashedPassword,
       name: data.name,
-      role: (data.role as any) || 'ATTORNEY'
+      role: 'SECRETARY'
     }
   })
 

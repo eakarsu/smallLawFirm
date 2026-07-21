@@ -95,16 +95,6 @@ export default function LoginPage() {
               </div>
             )}
 
-            <div className="p-4 bg-blue-50 border border-blue-200 rounded-md">
-              <p className="text-sm font-semibold text-blue-900 mb-2">Demo Accounts:</p>
-              <div className="space-y-1 text-xs text-blue-800">
-                <div><span className="font-medium">Admin:</span> admin@lawfirm.com / password123</div>
-                <div><span className="font-medium">Partner:</span> sarah.mitchell@lawfirm.com / password123</div>
-                <div><span className="font-medium">Attorney:</span> attorney@lawfirm.com / password123</div>
-                <div><span className="font-medium">Paralegal:</span> paralegal@lawfirm.com / password123</div>
-              </div>
-            </div>
-
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input

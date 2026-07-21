@@ -1,16 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
+import { authEmailConfiguration, sendAuthEmail } from '@/lib/auth-email'
 import crypto from 'crypto'
 
+const digest = (token: string) => crypto.createHash('sha256').update(token).digest('hex')
+
 // POST /api/auth/verify-email - Send verification email
-export async function POST(request: NextRequest) {
+export async function POST(_request: NextRequest) {
   try {
     const user = await getCurrentUser()
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    authEmailConfiguration()
     const fullUser = await prisma.user.findUnique({ where: { id: user.id } })
     if (!fullUser) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 })
@@ -25,15 +29,18 @@ export async function POST(request: NextRequest) {
 
     await prisma.user.update({
       where: { id: user.id },
-      data: { emailVerificationToken: verificationToken }
+      data: { emailVerificationToken: digest(verificationToken) }
     })
 
-    // In production, send verification email here
-    console.log(`Email verification token for ${user.email}: ${verificationToken}`)
+    try {
+      await sendAuthEmail('email-verification', user.email, verificationToken)
+    } catch (error) {
+      await prisma.user.update({ where: { id: user.id }, data: { emailVerificationToken: null } })
+      throw error
+    }
 
     return NextResponse.json({
-      message: 'Verification email sent. Please check your inbox.',
-      ...(process.env.NODE_ENV !== 'production' && { verificationToken })
+      message: 'Verification email sent. Please check your inbox.'
     })
   } catch (error) {
     console.error('Send verification error:', error)
@@ -51,7 +58,7 @@ export async function PUT(request: NextRequest) {
     }
 
     const user = await prisma.user.findFirst({
-      where: { emailVerificationToken: token }
+      where: { emailVerificationToken: digest(String(token)) }
     })
 
     if (!user) {

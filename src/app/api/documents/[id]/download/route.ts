@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getCurrentUser } from '@/lib/auth'
 import { readFile, access } from 'fs/promises'
-import { join } from 'path'
+import { isAbsolute, resolve, sep } from 'path'
 import { constants } from 'fs'
 
 export async function GET(
@@ -39,27 +39,21 @@ export async function GET(
     const relativePath = document.filePath.startsWith('/')
       ? document.filePath.slice(1)
       : document.filePath
-    const fullPath = join(process.cwd(), relativePath)
+    if (!process.env.DOCUMENT_STORAGE_ROOT || !isAbsolute(process.env.DOCUMENT_STORAGE_ROOT)) {
+      return NextResponse.json({ error: 'DOCUMENT_STORAGE_ROOT must be configured as an absolute path' }, { status: 503 })
+    }
+    const storageRoot = resolve(process.env.DOCUMENT_STORAGE_ROOT)
+    const storageRelativePath = relativePath.startsWith('uploads/') ? relativePath.slice('uploads/'.length) : relativePath
+    const fullPath = resolve(storageRoot, storageRelativePath)
+    if (fullPath !== storageRoot && !fullPath.startsWith(`${storageRoot}${sep}`)) {
+      return NextResponse.json({ error: 'Document storage path is invalid' }, { status: 400 })
+    }
 
     // Check if file exists
     try {
       await access(fullPath, constants.R_OK)
     } catch {
-      // File doesn't exist on disk - create a placeholder text file for demo
-      const placeholderContent = `Document: ${document.name || document.fileName}\n\nThis is a placeholder file. The original file was not found on disk.\n\nFile details:\n- Original filename: ${document.fileName}\n- File type: ${document.fileType}\n- File path: ${document.filePath}`
-
-      // Sanitize filename for HTTP header
-      const safeBaseName = document.fileName
-        .replace(/\.[^/.]+$/, '')
-        .replace(/[^\x00-\x7F]/g, '_')
-        .replace(/[<>:"/\\|?*]/g, '_')
-
-      return new NextResponse(placeholderContent, {
-        headers: {
-          'Content-Type': 'text/plain',
-          'Content-Disposition': `attachment; filename="${safeBaseName}_placeholder.txt"`,
-        },
-      })
+      return NextResponse.json({ error: 'Document binary is unavailable; no substitute content was generated.' }, { status: 410 })
     }
 
     // Read file from disk

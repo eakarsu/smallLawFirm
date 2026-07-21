@@ -7,18 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Scale } from 'lucide-react'
 import { PasswordStrength, getPasswordStrength } from '@/components/ui/password-strength'
-
-const roles = [
-  { value: 'ADMIN', label: 'Administrator' },
-  { value: 'PARTNER', label: 'Partner' },
-  { value: 'ATTORNEY', label: 'Attorney' },
-  { value: 'PARALEGAL', label: 'Paralegal' },
-  { value: 'SECRETARY', label: 'Secretary' },
-  { value: 'BILLING', label: 'Billing Staff' },
-]
 
 export default function RegisterPage() {
   const router = useRouter()
@@ -26,7 +16,6 @@ export default function RegisterPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
-  const [role, setRole] = useState('ATTORNEY')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -36,7 +25,7 @@ export default function RegisterPage() {
     if (!name.trim()) return 'Name is required'
     if (!email.trim()) return 'Email is required'
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return 'Please enter a valid email address'
-    if (password.length < 8) return 'Password must be at least 8 characters'
+    if (password.length < 12) return 'Password must be at least 12 characters'
     if (passwordScore < 3) return 'Password is too weak. Add uppercase, lowercase, numbers, and special characters.'
     if (password !== confirmPassword) return 'Passwords do not match'
     return null
@@ -58,7 +47,7 @@ export default function RegisterPage() {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email, password, role })
+        body: JSON.stringify({ name, email, password })
       })
 
       const data = await res.json()
@@ -130,7 +119,7 @@ export default function RegisterPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                minLength={8}
+                minLength={12}
               />
               <PasswordStrength password={password} />
             </div>
@@ -146,21 +135,6 @@ export default function RegisterPage() {
               {confirmPassword && password !== confirmPassword && (
                 <p className="text-xs text-red-500">Passwords do not match</p>
               )}
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="role">Role</Label>
-              <Select value={role} onValueChange={setRole}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a role" />
-                </SelectTrigger>
-                <SelectContent>
-                  {roles.map((r) => (
-                    <SelectItem key={r.value} value={r.value}>
-                      {r.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
           </CardContent>
           <CardFooter className="flex flex-col space-y-4">

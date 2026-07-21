@@ -6,7 +6,11 @@ const prisma = new PrismaClient()
 async function main() {
   console.log('Seeding database with comprehensive data...')
 
-  const hashedPassword = await bcrypt.hash('password123', 12)
+  const seedPassword = process.env.SEED_USER_PASSWORD
+  if (!seedPassword || seedPassword.length < 16) {
+    throw new Error('SEED_USER_PASSWORD must contain at least 16 characters')
+  }
+  const hashedPassword = await bcrypt.hash(seedPassword, 12)
 
   // ==================== USERS (15+) ====================
   console.log('Creating users...')

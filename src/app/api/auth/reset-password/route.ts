@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { hashPassword } from '@/lib/auth'
+import { authEmailConfiguration, sendAuthEmail } from '@/lib/auth-email'
 import crypto from 'crypto'
+
+const digest = (token: string) => crypto.createHash('sha256').update(token).digest('hex')
 
 // POST /api/auth/reset-password - Request password reset
 export async function POST(request: NextRequest) {
@@ -12,7 +15,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Email is required' }, { status: 400 })
     }
 
-    const user = await prisma.user.findUnique({ where: { email } })
+    authEmailConfiguration()
+    const normalizedEmail = String(email).trim().toLowerCase()
+    const user = await prisma.user.findUnique({ where: { email: normalizedEmail } })
 
     // Always return success to prevent email enumeration
     if (!user) {
@@ -26,18 +31,23 @@ export async function POST(request: NextRequest) {
     await prisma.user.update({
       where: { id: user.id },
       data: {
-        passwordResetToken: resetToken,
+        passwordResetToken: digest(resetToken),
         passwordResetExpires: resetExpires
       }
     })
 
-    // In production, send email here. For now, log the token.
-    console.log(`Password reset token for ${email}: ${resetToken}`)
+    try {
+      await sendAuthEmail('password-reset', normalizedEmail, resetToken)
+    } catch (error) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { passwordResetToken: null, passwordResetExpires: null },
+      })
+      throw error
+    }
 
     return NextResponse.json({
-      message: 'If an account with that email exists, a password reset link has been sent.',
-      // Include token in dev for testing
-      ...(process.env.NODE_ENV !== 'production' && { resetToken })
+      message: 'If an account with that email exists, a password reset link has been sent.'
     })
   } catch (error) {
     console.error('Reset password error:', error)
@@ -54,13 +64,13 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: 'Token and new password are required' }, { status: 400 })
     }
 
-    if (newPassword.length < 8) {
-      return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 })
+    if (newPassword.length < 12) {
+      return NextResponse.json({ error: 'Password must be at least 12 characters' }, { status: 400 })
     }
 
     const user = await prisma.user.findFirst({
       where: {
-        passwordResetToken: token,
+        passwordResetToken: digest(String(token)),
         passwordResetExpires: { gt: new Date() }
       }
     })

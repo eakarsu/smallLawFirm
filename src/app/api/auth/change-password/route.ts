@@ -16,8 +16,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Current password and new password are required' }, { status: 400 })
     }
 
-    if (newPassword.length < 8) {
-      return NextResponse.json({ error: 'New password must be at least 8 characters' }, { status: 400 })
+    if (newPassword.length < 12) {
+      return NextResponse.json({ error: 'New password must be at least 12 characters' }, { status: 400 })
     }
 
     // Validate password strength
@@ -26,9 +26,9 @@ export async function POST(request: NextRequest) {
     const hasNumber = /[0-9]/.test(newPassword)
     const hasSpecial = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(newPassword)
 
-    if (!hasUpper || !hasLower || !hasNumber) {
+    if (!hasUpper || !hasLower || !hasNumber || !hasSpecial) {
       return NextResponse.json({
-        error: 'Password must contain at least one uppercase letter, one lowercase letter, and one number'
+        error: 'Password must contain uppercase, lowercase, number, and special characters'
       }, { status: 400 })
     }
 

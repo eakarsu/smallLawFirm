@@ -14,14 +14,14 @@ import {
   DollarSign,
   Gavel,
   MessageSquare,
-  Brain,
   Settings,
   LogOut,
   ChevronDown,
   ListTodo,
   Receipt,
   AlertTriangle,
-  Bell
+  Bell,
+  ShieldCheck
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth-store'
 import { Button } from '@/components/ui/button'
@@ -45,10 +45,9 @@ const navigation = [
   { name: 'Expenses', href: '/expenses', icon: Receipt },
   { name: 'Billing', href: '/billing', icon: DollarSign },
   { name: 'Court Filings', href: '/filings', icon: Gavel },
-  { name: 'Service Tracker', href: '/filing-service-tracker', icon: Gavel },
+  { name: 'Governed Filings', href: '/governed-filings', icon: ShieldCheck },
   { name: 'Messages', href: '/messages', icon: MessageSquare },
   { name: 'Notifications', href: '/notifications', icon: Bell },
-  { name: 'AI Assistant', href: '/ai', icon: Brain },
 ]
 
 export function Sidebar() {

@@ -4,7 +4,7 @@ import { cookies } from 'next/headers'
 
 export async function POST(request: NextRequest) {
   try {
-    const { email, password, name, role } = await request.json()
+    const { email, password, name } = await request.json()
 
     if (!email || !password || !name) {
       return NextResponse.json(
@@ -13,14 +13,14 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const { user, token } = await register({ email, password, name, role })
+    const { user, token } = await register({ email, password, name })
 
     const cookieStore = await cookies()
     cookieStore.set('auth-token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7, // 7 days
+      maxAge: 60 * 60 * 8,
       path: '/'
     })
 
