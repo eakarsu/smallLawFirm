@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
     const cookieStore = await cookies()
     cookieStore.set('auth-token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure: String(process.env.NEXTAUTH_URL || '').startsWith('https://'),
       sameSite: 'lax',
       maxAge: 60 * 60 * 8,
       path: '/'

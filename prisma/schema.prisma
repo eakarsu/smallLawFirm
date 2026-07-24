@@ -45,8 +45,25 @@ model User {
   assignedTasks     Task[]          @relation("TaskAssignee")
   createdClients    Client[]        @relation("ClientCreator")
   governedFilingsCreated GovernedFilingPackage[] @relation("GovernedFilingCreator")
+  aiProviderReceipts AiProviderReceipt[]
 
   @@map("users")
+}
+
+model AiProviderReceipt {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  provider          String
+  providerRequestId String
+  model             String
+  prompt            String
+  content           String
+  createdAt         DateTime @default(now())
+
+  @@unique([provider, providerRequestId])
+  @@index([userId, createdAt])
+  @@map("ai_provider_receipts")
 }
 
 enum UserRole {

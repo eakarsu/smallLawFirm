@@ -3,13 +3,13 @@ set -euo pipefail
 
 startup_output=$(mktemp /tmp/smalllawfirm-startup.XXXXXX)
 trap 'rm -f "$startup_output"' EXIT
-if env -u DATABASE_URL -u NEXTAUTH_SECRET ./start.sh >"$startup_output" 2>&1; then
+if env -u DATABASE_URL -u NEXTAUTH_SECRET NODE_ENV=test ./start.sh >"$startup_output" 2>&1; then
   echo "start.sh unexpectedly accepted absent configuration" >&2
   exit 1
 fi
 grep -q 'DATABASE_URL is required' "$startup_output"
 
-if DATABASE_URL='postgresql://unused@127.0.0.1:1/unused' NEXTAUTH_SECRET='short' ./start.sh >"$startup_output" 2>&1; then
+if NODE_ENV=test DATABASE_URL='postgresql://unused@127.0.0.1:1/unused' NEXTAUTH_SECRET='short' ./start.sh >"$startup_output" 2>&1; then
   echo "start.sh unexpectedly accepted a weak secret" >&2
   exit 1
 fi
