@@ -93,7 +93,7 @@ fi
 : "${BACKEND_PORT:?BACKEND_PORT is required; choose an unused port explicitly}"
 : "${FRONTEND_PORT:?FRONTEND_PORT is required; choose an unused port explicitly}"
 [[ "$BACKEND_PORT" != "$FRONTEND_PORT" ]] || { echo 'API and UI ports must be distinct' >&2; exit 1; }
-[[ "$BACKEND_PORT" == 30974 && "$FRONTEND_PORT" == 30975 ]] || { echo 'Expected assigned ports 30974/30975' >&2; exit 1; }
+[[ "$BACKEND_PORT" =~ ^[0-9]+$ && "$FRONTEND_PORT" =~ ^[0-9]+$ && "$BACKEND_PORT" != "$FRONTEND_PORT" ]] || { echo 'Assigned ports must be distinct numbers' >&2; exit 1; }
 if [[ ! -d "$source_dir/node_modules" ]]; then
   echo "Dependencies are absent. Run 'npm ci' explicitly before startup." >&2
   exit 1
