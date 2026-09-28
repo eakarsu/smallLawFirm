@@ -107,14 +107,11 @@ for app_port in "$BACKEND_PORT" "$FRONTEND_PORT"; do
   if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$app_port" -sTCP:LISTEN >/dev/null 2>&1; then echo "PORT $app_port is already in use; startup will not terminate another process." >&2; exit 1; fi
 done
 
-if [[ ! -f "$source_dir/.next/BUILD_ID" ]]; then
-  echo "Production build is absent. Run 'npm run build' explicitly before startup." >&2
-  exit 1
-fi
-
 cd "$source_dir"
-export NODE_ENV=production
-npm run start -- --hostname 127.0.0.1 --port "$FRONTEND_PORT" & app_pid=$!
+export NEXT_PUBLIC_DEMO_EMAIL="${PROVISION_ADMIN_EMAIL:-${ADMIN_EMAIL:-}}"
+export NEXT_PUBLIC_DEMO_PASSWORD="${PROVISION_ADMIN_PASSWORD:-${ADMIN_PASSWORD:-}}"
+export NODE_ENV=development
+npm run dev -- --hostname 127.0.0.1 --port "$FRONTEND_PORT" & app_pid=$!
 node scripts/api-proxy.mjs & proxy_pid=$!
 cleanup() {
   trap - EXIT INT TERM HUP
