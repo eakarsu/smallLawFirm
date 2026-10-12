@@ -25,32 +25,17 @@ export default function LoginPage() {
   const [resetMessage, setResetMessage] = useState('')
   const [resetLoading, setResetLoading] = useState(false)
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setError('')
-    setLoading(true)
-
+  const login = async (selectedEmail: string, selectedPassword: string) => {
+    setError(''); setLoading(true)
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
-      })
-
-      const data = await res.json()
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Login failed')
-      }
-
-      router.push('/dashboard')
-      router.refresh()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed')
-    } finally {
-      setLoading(false)
-    }
+      const response = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: selectedEmail, password: selectedPassword }) })
+      const body = await response.json()
+      if (!response.ok) throw new Error(body.error || 'Login failed')
+      router.push('/dashboard'); router.refresh()
+    } catch (failure) { setError(failure instanceof Error ? failure.message : 'Login failed') }
+    finally { setLoading(false) }
   }
+  const handleSubmit = async (event: React.FormEvent) => { event.preventDefault(); await login(email, password) }
 
   const handleForgotPassword = async () => {
     if (!resetEmail) return
@@ -133,12 +118,12 @@ export default function LoginPage() {
           <CardFooter className="flex flex-col space-y-4">
           <button
             type="button"
-            onClick={async () => { const demoEmail = process.env.NEXT_PUBLIC_DEMO_EMAIL || ''; const demoPassword = process.env.NEXT_PUBLIC_DEMO_PASSWORD || ''; setEmail(demoEmail); setPassword(demoPassword); if (!demoEmail || !demoPassword) { setError('Demo credentials are not configured.'); return; } setLoading(true); setError(''); try { const result = await signIn('credentials', { email: demoEmail, password: demoPassword, redirect: false }); if (result?.error) { setError('Invalid email or password'); } else { router.push('/dashboard'); router.refresh(); } } catch { setError('An error occurred. Please try again.'); } finally { setLoading(false); } }}
-            disabled={!process.env.NEXT_PUBLIC_DEMO_EMAIL || !process.env.NEXT_PUBLIC_DEMO_PASSWORD}
-            aria-label="Auto Fill Demo Credentials"
+            onClick={() => { const demoEmail = process.env.NEXT_PUBLIC_DEMO_EMAIL || ''; const demoPassword = process.env.NEXT_PUBLIC_DEMO_PASSWORD || ''; if (!demoEmail || !demoPassword) { setError('Demo credentials are not configured.'); return; } setEmail(demoEmail); setPassword(demoPassword); setError(''); }}
+            disabled={loading}
+            aria-label="Fill Demo Credentials"
             style={{ width: '100%', marginBottom: '12px', padding: '10px 14px', borderRadius: '8px', border: '1px solid currentColor', background: 'transparent', cursor: 'pointer' }}
           >
-            Auto Fill Demo Credentials
+            Fill Demo Credentials
           </button>
           <Button type="submit" className="w-full" disabled={loading}>
               {loading ? 'Signing in...' : 'Sign In'}
